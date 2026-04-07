@@ -56,3 +56,5 @@ Desktop.ini
 .cache/
 
 plans/
+*.json
+*.png
