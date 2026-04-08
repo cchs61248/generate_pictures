@@ -125,7 +125,7 @@ async def _repair_to_json_webapi(gemini_client, raw_text: str) -> list[dict]:
 以下是待修復原文：
 {raw_text}
 """
-    repaired = await gemini_client.generate_content(repair_prompt)
+    repaired = await gemini_client.generate_content(repair_prompt, model='gemini-3-flash-thinking')
     candidate = _extract_json_candidate(repaired.text or "")
     data = json.loads(candidate)
     return data
@@ -147,6 +147,27 @@ def load_env_file(env_path: str = ".env") -> None:
                 os.environ[key] = value
 
 
+def _is_transient_google_api_error(err_str: str) -> bool:
+    """可重試的暫時性錯誤：限速、或 Google 端靜默中止連線等。"""
+    lower = err_str.lower()
+    return (
+        "429" in err_str
+        or "resource_exhausted" in lower
+        or "silently aborted" in lower
+        or "aborted by google" in lower
+    )
+
+
+def _retry_wait_seconds_for_google(err_str: str) -> int:
+    delay_match = re.search(r"retryDelay['\"]?\s*[:\s]+['\"]?(\d+)s", err_str, re.IGNORECASE)
+    if delay_match:
+        return int(delay_match.group(1)) + 5
+    lower = err_str.lower()
+    if "silently aborted" in lower or "aborted by google" in lower:
+        return 25
+    return 60
+
+
 def _generate_image_with_retry(
     client: genai.Client,
     image_prompt: str,
@@ -154,7 +175,7 @@ def _generate_image_with_retry(
     max_retries: int = 5,
 ) -> object:
     """
-    方案一：呼叫 Gemini 圖片生成，遇到 429 限速時自動讀取 retryDelay 並等待後重試。
+    方案一：呼叫 Gemini 圖片生成，遇到 429 限速或 Google 端暫時中止時自動等待後重試。
     超過 max_retries 次仍失敗則拋出例外。
     """
     for attempt in range(max_retries + 1):
@@ -172,12 +193,15 @@ def _generate_image_with_retry(
             )
         except Exception as exc:
             err_str = str(exc)
-            is_rate_limit = "429" in err_str or "RESOURCE_EXHAUSTED" in err_str
-            if is_rate_limit and attempt < max_retries:
-                delay_match = re.search(r"retryDelay['\"]?\s*[:\s]+['\"]?(\d+)s", err_str)
-                wait_sec = int(delay_match.group(1)) + 5 if delay_match else 60
+            if _is_transient_google_api_error(err_str) and attempt < max_retries:
+                wait_sec = _retry_wait_seconds_for_google(err_str)
+                reason = (
+                    "Google 端暫時中止連線"
+                    if "abort" in err_str.lower()
+                    else "限速（429）"
+                )
                 print(
-                    f"  ⏳ 遇到限速（429），等待 {wait_sec} 秒後重試"
+                    f"  ⏳ 遇到{reason}，等待 {wait_sec} 秒後重試"
                     f"（第 {attempt + 1}/{max_retries} 次）..."
                 )
                 time.sleep(wait_sec)
@@ -189,18 +213,38 @@ async def _generate_image_webapi(
     gemini_client,
     image_prompt: str,
     image_path: str,
+    max_retries: int = 5,
 ) -> list:
     """
     方案二：透過 gemini_webapi 生成圖片。
     prompt 開頭明確要求生成圖片，確保 Gemini 網頁版觸發圖片生成模式。
+    遇暫時性錯誤（含 Google 靜默中止）會自動重試。
     回傳 GeneratedImage 物件清單（可能為空）。
     """
     final_prompt = f"""請幫我生成一張電商商品圖片，圖片大小1000*1000，請參考我上傳的商品圖片外觀，依照以下設計要求生成：
 
 {image_prompt}
 """
-    response = await gemini_client.generate_content(final_prompt, files=[image_path])
-    return response.images if response.images else []
+    for attempt in range(max_retries + 1):
+        try:
+            response = await gemini_client.generate_content(final_prompt, model='gemini-3-flash-thinking', files=[image_path])
+            return response.images if response.images else []
+        except Exception as exc:
+            err_str = str(exc)
+            if _is_transient_google_api_error(err_str) and attempt < max_retries:
+                wait_sec = _retry_wait_seconds_for_google(err_str)
+                reason = (
+                    "Google 端暫時中止連線"
+                    if "abort" in err_str.lower()
+                    else "暫時性錯誤"
+                )
+                print(
+                    f"  ⏳ Web API 產圖遇到{reason}，等待 {wait_sec} 秒後重試"
+                    f"（第 {attempt + 1}/{max_retries} 次）..."
+                )
+                await asyncio.sleep(wait_sec)
+            else:
+                raise
 
 
 def search_web(query: str) -> str:
@@ -229,7 +273,6 @@ def fetch_webpage(url: str) -> str:
         response.raise_for_status()
         soup = BeautifulSoup(response.text, "html.parser")
         text = soup.get_text(separator="\n", strip=True)
-        print(text[:5000])
         return text[:5000]
     except Exception as e:
         return f"無法讀取網頁: {e}"
@@ -238,21 +281,30 @@ def fetch_webpage(url: str) -> str:
 async def main():
     load_env_file()
 
-    backend = os.environ.get("GEMINI_BACKEND", "apikey").lower().strip()
+    backend_raw = os.environ.get("GEMINI_BACKEND", "apikey")
+    backend = (backend_raw or "apikey").lower().strip()
     use_webapi = backend == "webapi"
+    use_hybrid = backend == "hybrid"
+    if backend not in {"apikey", "webapi", "hybrid"}:
+        print(
+            f'⚠️ GEMINI_BACKEND 應為 apikey、webapi 或 hybrid，目前為「{backend_raw}」，將依 apikey 處理。'
+        )
+        backend = "apikey"
+        use_webapi = False
+        use_hybrid = False
 
     stage3_only_mode = (
         os.environ.get("STAGE3_ONLY_MODE", "").lower() in {"1", "true", "yes"}
         or "--stage3-only" in sys.argv
     )
-    client = None          # 方案一 genai.Client
-    gemini_client = None   # 方案二 GeminiClient
+    client = None          # 方案一／hybrid：genai.Client
+    gemini_client = None   # 方案二／hybrid 階段三：GeminiClient
     image = None
     image_path_abs = None
     final_data = None
 
     if not stage3_only_mode:
-        image_path = "EX-11419WH-01.jpg"
+        image_path = "sample.jpg"
         image_path_abs = os.path.join(os.path.dirname(os.path.abspath(__file__)), image_path)
 
         if use_webapi:
@@ -266,6 +318,30 @@ async def main():
             gemini_client = GeminiClient(psid, psidts, proxy=None)
             await gemini_client.init(timeout=30, auto_close=False, close_delay=300, auto_refresh=True)
             print("✅ [方案二] GeminiClient 初始化完成（Cookie 模式）")
+        elif use_hybrid:
+            # 方案三：階段一／二 API Key，階段三 Web API 產圖
+            from gemini_webapi import GeminiClient
+            api_key = os.environ.get("GOOGLE_API_KEY") or os.environ.get("GEMINI_API_KEY")
+            if not api_key:
+                print(
+                    "請在環境變數或 .env 設定 GOOGLE_API_KEY 或 GEMINI_API_KEY"
+                    "（GEMINI_BACKEND=hybrid 時階段一／二必填）。"
+                )
+                return
+            client = genai.Client(api_key=api_key)
+            psid   = os.environ.get("GEMINI_COOKIE_1PSID", "")
+            psidts = os.environ.get("GEMINI_COOKIE_1PSIDTS", "")
+            if not psid:
+                print(
+                    "請在 .env 設定 GEMINI_COOKIE_1PSID（GEMINI_BACKEND=hybrid 時階段三產圖必填）。"
+                )
+                return
+            gemini_client = GeminiClient(psid, psidts, proxy=None)
+            await gemini_client.init(timeout=30, auto_close=False, close_delay=300, auto_refresh=True)
+            print(
+                "✅ [方案三] genai.Client + GeminiClient 初始化完成"
+                "（階段一／二 API Key，階段三 Cookie 產圖）"
+            )
         else:
             # 方案一初始化
             api_key = os.environ.get("GOOGLE_API_KEY") or os.environ.get("GEMINI_API_KEY")
@@ -365,7 +441,7 @@ async def main():
 
 請盡可能查詢最新且準確的台灣在地資訊，若搜尋不到特定資料請標注「待確認」。
 """
-            info_response = await gemini_client.generate_content(info_prompt, files=[image_path_abs])
+            info_response = await gemini_client.generate_content(info_prompt, model='gemini-3-flash-thinking', files=[image_path_abs])
             gathered_info = info_response.text
 
         else:
@@ -468,7 +544,7 @@ async def main():
 
         if use_webapi:
             format_response = await gemini_client.generate_content(
-                format_prompt, files=[image_path_abs]
+                format_prompt, model='gemini-3-flash-thinking', files=[image_path_abs]
             )
             raw_output = format_response.text or ""
         else:
@@ -534,16 +610,25 @@ async def main():
     )
 
     if not use_existing_image_only:
-        if use_webapi and gemini_client is None:
+        if (use_webapi or use_hybrid) and gemini_client is None:
             from gemini_webapi import GeminiClient
             psid   = os.environ.get("GEMINI_COOKIE_1PSID", "")
             psidts = os.environ.get("GEMINI_COOKIE_1PSIDTS", "")
             if not psid:
-                print("請在 .env 設定 GEMINI_COOKIE_1PSID。")
+                print(
+                    "請在 .env 設定 GEMINI_COOKIE_1PSID"
+                    "（GEMINI_BACKEND=webapi 或 hybrid 時階段三產圖必填）。"
+                )
                 return
             gemini_client = GeminiClient(psid, psidts, proxy=None)
             await gemini_client.init(timeout=30, auto_close=False, close_delay=300, auto_refresh=True)
-        elif not use_webapi and client is None:
+            print("列出可用模型：")
+            models = gemini_client.list_models()
+            if models:
+                for model in models:
+                    print(f"{model.display_name}: {model.model_name}")
+
+        elif not use_webapi and not use_hybrid and client is None:
             api_key = os.environ.get("GOOGLE_API_KEY") or os.environ.get("GEMINI_API_KEY")
             if not api_key:
                 print("請在環境變數或 .env 設定 GOOGLE_API_KEY 或 GEMINI_API_KEY，否則無法生成圖片。")
@@ -551,7 +636,7 @@ async def main():
             client = genai.Client(api_key=api_key)
 
         if image is None and image_path_abs is None:
-            image_path = "EX-11419WH-01.jpg"
+            image_path = "sample.jpg"
             image_path_abs = os.path.join(os.path.dirname(os.path.abspath(__file__)), image_path)
             try:
                 image = Image.open(image_path_abs)
@@ -616,13 +701,13 @@ async def main():
                     print(f"  ⚠️  測試模式啟用，但找不到檔案：{existing_image_path}")
                     continue
 
-            elif use_webapi:
-                # 方案二：gemini_webapi 圖片生成
+            elif use_webapi or use_hybrid:
+                # 方案二／方案三階段三：gemini_webapi 圖片生成
                 generated_images = await _generate_image_webapi(
                     gemini_client, image_prompt, image_path_abs
                 )
                 if not generated_images:
-                    print(f"  ⚠️  P{sort_num:02d} 方案二未取得圖片（Gemini 未生成圖片），跳過。")
+                    print(f"  ⚠️  P{sort_num:02d} Web API 產圖未取得圖片（Gemini 未生成圖片），跳過。")
                     continue
                 # 必須傳 path=，否則 gemini_webapi 預設 path="temp"，檔案會寫到別的資料夾
                 temp_filename = f"P{sort_num:02d}_{safe_name}_temp.png"
