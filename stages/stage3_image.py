@@ -8,6 +8,32 @@ from services.image_gen import generate_image_with_retry, generate_image_webapi
 from services.image_process import build_safe_name, compose_image_prompt
 
 
+def _extract_pil_image(generated_image) -> Image.Image | None:
+    if isinstance(generated_image, Image.Image):
+        return generated_image
+
+    for attr in ("image", "pil_image", "_pil_image"):
+        value = getattr(generated_image, attr, None)
+        if isinstance(value, Image.Image):
+            return value
+
+    for attr in ("data", "bytes", "image_bytes", "_image_bytes"):
+        value = getattr(generated_image, attr, None)
+        if isinstance(value, (bytes, bytearray)) and value:
+            image = Image.open(io.BytesIO(value))
+            image.load()
+            return image
+
+    for method_name in ("to_pil", "as_pil"):
+        method = getattr(generated_image, method_name, None)
+        if callable(method):
+            value = method()
+            if isinstance(value, Image.Image):
+                return value
+
+    return None
+
+
 async def generate_all_images(
     final_data: list[dict],
     image,
@@ -40,14 +66,14 @@ async def generate_all_images(
                 if not generated_images:
                     print(f"  ⚠️  P{sort_num:02d} Web API 產圖未取得圖片（Gemini 未生成圖片），跳過。")
                     continue
-                temp_filename = f"P{sort_num:02d}_{safe_name}_temp.png"
-                saved_temp_path = await generated_images[0].save(
-                    path=picture_dir,
-                    filename=temp_filename,
-                    verbose=True,
-                )
-                raw_image = Image.open(saved_temp_path)
-                raw_image.load()
+                generated_image = generated_images[0]
+                raw_image = _extract_pil_image(generated_image)
+                if raw_image is None:
+                    attrs = [name for name in dir(generated_image) if not name.startswith("_")]
+                    preview = ", ".join(attrs[:20]) if attrs else "(無可見屬性)"
+                    raise ValueError(
+                        f"Web API 產圖格式不支援，型別={type(generated_image).__name__}，可見屬性: {preview}"
+                    )
             else:
                 response = generate_image_with_retry(genai_client, image_prompt, image)
                 for part in response.parts:
@@ -69,6 +95,9 @@ async def generate_all_images(
         except Exception as exc:
             print(f"  ❌ P{sort_num:02d} 圖片生成失敗：{exc}")
         break
+    if saved_files:
+        print("\n✅ [階段三完成] 所有圖片已儲存至 picture/ 資料夾。")
+    else:
+        print("\n⚠️ [階段三完成] 本次未成功儲存任何圖片。")
 
-    print("\n✅ [階段三完成] 所有圖片已儲存至 picture/ 資料夾。")
     return saved_files

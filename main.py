@@ -1,6 +1,12 @@
 import argparse
 import asyncio
 import os
+import sys
+
+if hasattr(sys.stdout, "reconfigure"):
+    sys.stdout.reconfigure(encoding="utf-8")
+if hasattr(sys.stderr, "reconfigure"):
+    sys.stderr.reconfigure(encoding="utf-8")
 
 from core.config import load_env_file, parse_config
 from core.pipeline import run_pipeline
