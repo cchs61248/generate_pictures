@@ -4,3 +4,4 @@ google-genai==1.70.0
 Pillow==12.2.0
 ddgs==9.13.0
 rembg[cpu]==2.0.74
+gemini_webapi
