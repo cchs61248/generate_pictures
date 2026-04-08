@@ -1,4 +1,4 @@
-prompt_template="""
+prompt_template = """
 ## 統一風格：
 - **深藍 #003355 + 明黃 #FFD100 品牌色統一**
 - **寫實商業產品攝影**

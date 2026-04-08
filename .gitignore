@@ -59,3 +59,4 @@ plans/
 *.json
 *.png
 *.jpg
+__init__.py

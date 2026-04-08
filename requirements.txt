@@ -5,3 +5,5 @@ Pillow==12.2.0
 ddgs==9.13.0
 rembg[cpu]==2.0.74
 gemini_webapi
+fastapi==0.116.1
+uvicorn==0.35.0
