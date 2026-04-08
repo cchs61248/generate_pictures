@@ -145,7 +145,7 @@ def _generate_image_with_retry(
                     response_modalities=["IMAGE"],
                     image_config=types.ImageConfig(
                         aspect_ratio="1:1",
-                        image_size="1K",
+                        image_size="512",
                     ),
                 ),
             )
@@ -180,7 +180,9 @@ def search_web(query: str) -> str:
 
 def fetch_webpage(url: str) -> str:
     """
-    當使用者提供特定的網址 (URL) 時，使用此工具來讀取該網頁的文字內容。
+    讀取指定網址的網頁文字內容。
+    當使用者訊息中含有 http(s) 網址時必須呼叫本工具（每個相關網址至少一次），
+    不可僅以搜尋結果推測該頁內容。
     """
     print(f"\n👉 [系統提示] 觸發網頁讀取工具，正在訪問網址: {url}")
     try:
@@ -189,6 +191,7 @@ def fetch_webpage(url: str) -> str:
         response.raise_for_status()
         soup = BeautifulSoup(response.text, "html.parser")
         text = soup.get_text(separator="\n", strip=True)
+        print(text[:5000])
         return text[:5000]
     except Exception as e:
         return f"無法讀取網頁: {e}"
@@ -213,7 +216,7 @@ def main():
         client = genai.Client(api_key=api_key)
 
         # 準備商品圖片
-        image_path = "sample.jpg"
+        image_path = "EX-11419WH-01.jpg"
         try:
             image = Image.open(image_path)
             image.load()
@@ -243,12 +246,32 @@ def main():
             ),
         )
 
+        # 使用者若貼上網址，強制要求模型呼叫 fetch_webpage（不可只靠搜尋或臆測）
+        _url_re = re.compile(r"https?://[^\s<>'\"\]\)]+", re.IGNORECASE)
+        _dedup_urls: list[str] = []
+        _seen_urls: set[str] = set()
+        for _m in _url_re.finditer(user_input or ""):
+            u = _m.group(0).rstrip(".,);]\"'")
+            if u and u not in _seen_urls:
+                _seen_urls.add(u)
+                _dedup_urls.append(u)
+        if _dedup_urls:
+            url_mandatory_block = f"""
+        【強制工具】使用者輸入含下列網址，你必須使用 fetch_webpage 工具逐一讀取（每個網址至少成功呼叫一次），
+        並以網頁實際文字內容作為該段資訊的主要依據；禁止僅用 search_web 代替讀取該頁、禁止在未呼叫 fetch_webpage 前推測該網址上的規格或文案。
+        網址清單：{"、".join(_dedup_urls)}
+        """
+        else:
+            url_mandatory_block = """
+        【網址規則】若使用者訊息中出現 http(s) 網址，必須使用 fetch_webpage 讀取該頁；不得以搜尋結果猜測該連結內容。
+        """
+
         info_prompt = f"""
         請仔細分析我上傳的商品圖片，並結合以下用戶提供的文字或網址資訊：
         「{user_input}」
-
-        請主動使用搜尋與網頁讀取工具查詢相關資料，依照以下結構逐項整理，
-        這些資訊將直接用於後續生成 9 張電商商品圖的 AI 繪圖提示詞（P1～P9）：
+        {url_mandatory_block}
+        請主動使用搜尋（search_web）與網頁讀取（fetch_webpage）工具查詢相關資料；有網址時 fetch_webpage 為必要步驟。
+        依照以下結構逐項整理，這些資訊將直接用於後續生成 9 張電商商品圖的 AI 繪圖提示詞（P1～P9）：
 
         【基本資訊】
         - 商品品牌、完整型號、定價區間（台灣市場）
@@ -369,6 +392,30 @@ def main():
             return
         print(f"\n🧪 已啟用僅階段三模式，直接使用 {output_json_path}")
 
+    use_existing_image_only = (
+        os.environ.get("USE_EXISTING_IMAGE_ONLY", "").lower() in {"1", "true", "yes"}
+        or "--use-existing-image" in sys.argv
+    )
+    # 僅階段三模式略過前兩階段，未建立 client / 商品圖；實際呼叫圖片 API 時仍需要兩者
+    if not use_existing_image_only:
+        if client is None:
+            api_key = os.environ.get("GOOGLE_API_KEY") or os.environ.get("GEMINI_API_KEY")
+            if not api_key:
+                print("請在環境變數或 .env 設定 GOOGLE_API_KEY 或 GEMINI_API_KEY，否則無法生成圖片。")
+                return
+            client = genai.Client(api_key=api_key)
+        if image is None:
+            image_path = "EX-11419WH-01.jpg"
+            try:
+                image = Image.open(image_path)
+                image.load()
+            except FileNotFoundError:
+                print(
+                    f"階段三需要商品參考圖，請將 {image_path} 放在程式同目錄，"
+                    "或先關閉僅階段三模式跑完整流程。"
+                )
+                return
+
     # ==========================================
     # 階段三：圖片生成 (Image Generation)
     # ==========================================
@@ -376,10 +423,6 @@ def main():
 
     picture_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "picture")
     os.makedirs(picture_dir, exist_ok=True)
-    use_existing_image_only = (
-        os.environ.get("USE_EXISTING_IMAGE_ONLY", "").lower() in {"1", "true", "yes"}
-        or "--use-existing-image" in sys.argv
-    )
     existing_image_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "generated_image.png")
 
     for item in final_data:
@@ -406,6 +449,12 @@ def main():
 """
 
         print(f"\n🎨 [P{sort_num:02d}] 正在生成：{main_name} ...")
+        safe_name = (
+            main_name
+            .replace(" ", "_")
+            .replace("/", "_")
+            .replace("：", "")
+        )
 
         try:
             print(image_prompt)
@@ -425,7 +474,7 @@ def main():
                         image_bytes = part.inline_data.data
                         raw_image = Image.open(io.BytesIO(image_bytes))
                         raw_image.load()
-                        raw_image.save("generated_image.png")
+                        raw_image.save(f"P{sort_num:02d}_{safe_name}.png")
                         break
 
             if raw_image is None:
@@ -438,12 +487,6 @@ def main():
             # # 去背：Gemini 不原生支援透明背景，使用 rembg 移除背景輸出 RGBA PNG
             # no_bg = rembg_remove(resized)
 
-            safe_name = (
-                main_name
-                .replace(" ", "_")
-                .replace("/", "_")
-                .replace("：", "")
-            )
             filename  = f"P{sort_num:02d}_{safe_name}.png"
             filepath  = os.path.join(picture_dir, filename)
             resized.save(filepath, "PNG")
