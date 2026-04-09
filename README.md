@@ -1,115 +1,91 @@
-## 專案簡介
+# gnerate_pictures
 
-`gnerate_pictures` 是一個用 **Gemini** 自動產生「電商商品九宮格（P1～P9）」的工具：
+`gnerate_pictures` 是一個以 Gemini 為核心的商品圖生成專案，目標是把商品資訊整理成 P1～P9 的內容，再輸出九宮格行銷圖片。
 
-- **階段一**：讀取商品參考圖（預設 `sample.jpg`）+ 使用者輸入（文字或網址），蒐集商品資訊
-- **階段二**：依 `prompts\json_schema.py` 的 JSON 規範，輸出 9 筆（P1～P9）的「場景描述 + 文案 + 規格」
-- **階段三**：依 `prompts\image_style.py` 的風格模板，將每一筆轉為圖片 prompt，呼叫 Gemini 產圖輸出到 `picture\`
+## 專案做什麼
 
-目前主入口為 **`main.py`**。
+- 階段一：讀取商品參考圖（預設 `sample.jpg`）與使用者輸入（文字或網址）來蒐集資訊
+- 階段二：依 `prompts\json_schema.py` 生成標準化 JSON（P1～P9）
+- 階段三：依 `prompts\image_style.py` 轉成圖片 prompt，輸出圖片到 `picture\`
+- 同時提供 FastAPI 後端與 React 前端，支援本機互動式操作
 
----
+## 主要結構
 
-## 專案結構（重構後）
+- `main.py`：CLI 入口，協調整體流程
+- `core\`：設定、模型 client 初始化、pipeline 協調
+- `stages\`：三階段實作（蒐集 / JSON / 產圖）
+- `services\`：搜尋、重試、圖片處理等共用服務
+- `utils\json_utils.py`：JSON 抽取、驗證、修復
+- `prompts\`：文字生成與圖片風格 prompt
+- `api\server.py`：FastAPI 服務
+- `frontend\`：Vite + React + TypeScript 前端介面
+- `picture\`：輸出圖片目錄
+- `final_output.json`：P1～P9 最終結構化輸出
 
-- **`main.py`**：CLI 主入口（唯一 `asyncio.run`）
-- **`core\config.py`**：環境變數載入、常數、模式解析
-- **`core\clients.py`**：`apikey / webapi / hybrid` client 初始化
-- **`core\pipeline.py`**：三階段協調器
-- **`stages\stage1_gather.py`**：階段一（資訊收集）
-- **`stages\stage2_json.py`**：階段二（JSON 生成 / 驗證 / 修復）
-- **`stages\stage3_image.py`**：階段三（產圖 / 儲存）
-- **`services\`**：搜尋、產圖重試、圖片處理
-- **`utils\json_utils.py`**：JSON 抽取、驗證與修復
-- **`prompts\json_schema.py`**：階段二 prompt
-- **`prompts\image_style.py`**：階段三 prompt
-- **`api\server.py`**：FastAPI 介面（`POST /upload-image`、`POST /run`、`GET /images/...`）
-- **`frontend\`**：Vite + React + TypeScript 聊天 UI（上傳圖、送出問題、顯示產圖）
+## 環境需求
 
----
+- Windows（建議使用專案虛擬環境 `.venv`）
+- Node.js（前端開發用）
+- 已安裝 `requirements.txt` 內 Python 套件與前端 `npm` 依賴
 
-## 安裝與環境
+## 環境變數設定
 
-### 建立虛擬環境與安裝依賴（Windows）
+請將 `.env.example` 複製為 `.env`，並填入必要金鑰與設定。
 
-```bat
-cmd.exe /c "cd /d C:\Users\dqaiot\Documents\aaron\gnerate_pictures && py -m venv .venv && .venv\Scripts\python.exe -m pip install -r requirements.txt"
-```
-
----
-
-## 設定（.env）
-
-請複製 `.env.example` 成 `.env` 後填入真實值（請勿提交含真實 KEY/Cookie 的 `.env`）。
-
-### 重要環境變數
+常用欄位：
 
 - `GEMINI_BACKEND`：`apikey` / `webapi` / `hybrid`
-- `GOOGLE_API_KEY`（或 `GEMINI_API_KEY`）：`apikey` 或 `hybrid`（階段一/二）必填
-- `GEMINI_COOKIE_1PSID`、`GEMINI_COOKIE_1PSIDTS`：`webapi` 或 `hybrid`（階段三）必填
-- `STAGE3_ONLY_MODE`：`1` 時只跑階段三（讀取 `final_output.json`）
+- `GOOGLE_API_KEY` 或 `GEMINI_API_KEY`：`apikey`、`hybrid` 常用
+- `GEMINI_COOKIE_1PSID`、`GEMINI_COOKIE_1PSIDTS`：`webapi`、`hybrid` 常用
+- `STAGE3_ONLY_MODE`：`1` 代表僅執行階段三
 
----
+## 啟動方式（依目前專案架構）
 
-## 使用方式
+請分別開兩個終端機執行下列指令：
 
-### 1) 完整流程（階段一～三）
-
-```bat
-cmd.exe /c "cd /d C:\Users\dqaiot\Documents\aaron\gnerate_pictures && .venv\Scripts\python.exe main.py"
-```
-
-### 2) 只跑階段三（用既有 JSON 產圖）
+### 1) 啟動後端 API（FastAPI）
 
 ```bat
-cmd.exe /c "cd /d C:\Users\dqaiot\Documents\aaron\gnerate_pictures && .venv\Scripts\python.exe main.py --stage3-only"
+cmd.exe /c "cd /d c:\Users\dqaiot\Documents\aaron\gnerate_pictures && .venv\Scripts\python.exe -m uvicorn api.server:app --host 127.0.0.1 --port 8000"
 ```
 
-## API（前端串接）
-
-啟動 API 服務：
+### 2) 啟動前端（Vite）
 
 ```bat
-cmd.exe /c "cd /d C:\Users\dqaiot\Documents\aaron\gnerate_pictures && .venv\Scripts\python.exe -m uvicorn api.server:app --host 127.0.0.1 --port 8000"
+cmd.exe /c "cd /d c:\Users\dqaiot\Documents\aaron\gnerate_pictures\frontend && npm run dev"
 ```
 
-### Endpoint
+前端預設會呼叫 `http://127.0.0.1:8000`。
 
-- `POST /upload-image`：上傳單張商品圖（multipart 欄位 `file`），伺服器會轉存為專案根目錄 `sample.jpg`
-- `POST /run`：觸發 pipeline
-  - body 可帶：`user_input`、`stage3_only`
+## API 端點
+
+- `POST /upload-image`：上傳商品圖，伺服器會儲存為 `sample.jpg`
+- `POST /run`：啟動流程（可帶 `user_input`、`stage3_only`）
 - `GET /images/{filename}`：讀取輸出圖片
-- 已啟用 **CORS**（方便本機 React 開發伺服器跨域呼叫）
 
-### React 前端（`frontend\`）
+## CLI 用法（可選）
+
+完整執行三階段：
 
 ```bat
-cmd.exe /c "cd /d C:\Users\dqaiot\Documents\aaron\gnerate_pictures\frontend && npm install && npm run dev"
+cmd.exe /c "cd /d c:\Users\dqaiot\Documents\aaron\gnerate_pictures && .venv\Scripts\python.exe main.py"
 ```
 
-預設會連線至 `http://127.0.0.1:8000`。若要改後端位址，可複製 `frontend\.env.example` 為 `frontend\.env` 並設定 `VITE_API_BASE_URL`。
+只執行階段三：
 
----
+```bat
+cmd.exe /c "cd /d c:\Users\dqaiot\Documents\aaron\gnerate_pictures && .venv\Scripts\python.exe main.py --stage3-only"
+```
 
-## 輸入 / 輸出
+## 輸入與輸出
 
-### 輸入
-
-- 參考圖：`sample.jpg`
-- 使用者輸入：CLI 互動輸入文字或網址（或 API 的 `user_input`）
-
-### 輸出
-
-- `final_output.json`：長度 9 的 P1～P9 結構化內容
-- `picture\`：`P01_...png` 至 `P09_...png`（統一 1000x1000）
-
----
+- 輸入：`sample.jpg` + 使用者文字/網址
+- 輸出：
+  - `final_output.json`（P1～P9 結構化內容）
+  - `picture\`（`P01_...png` 到 `P09_...png`）
 
 ## 注意事項
 
-- 階段三已支援完整跑完 P1～P9（不再只產第一張）
-- 請勿提交 `.env`
-- 若缺少 `sample.jpg`，流程會中止並提示
-
-cmd.exe /c "cd /d c:\Users\dqaiot\Documents\aaron\gnerate_pictures && .venv\Scripts\python.exe -m uvicorn api.server:app --host 127.0.0.1 --port 8000"
-cmd.exe /c "cd /d c:\Users\dqaiot\Documents\aaron\gnerate_pictures\frontend && npm run dev"
+- 若缺少 `sample.jpg`，流程可能會中止
+- 請勿提交含敏感資訊的 `.env`
+- 建議先啟動後端再啟動前端
