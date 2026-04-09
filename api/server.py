@@ -15,6 +15,9 @@ from core.pipeline import run_pipeline
 from core.progress import ProgressBus
 
 
+SESSION_STATE_FILE = "session_state.json"
+
+
 def _project_root() -> str:
     return os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
@@ -67,6 +70,45 @@ def _readable_error(exc: Exception) -> str:
     return name
 
 
+def _session_state_path(project_root: str) -> str:
+    data_dir = os.path.join(project_root, "data")
+    os.makedirs(data_dir, exist_ok=True)
+    return os.path.join(data_dir, SESSION_STATE_FILE)
+
+
+def _load_session_state(project_root: str) -> dict:
+    path = _session_state_path(project_root)
+    if not os.path.exists(path):
+        return {"sessions": [], "activeId": ""}
+    try:
+        with open(path, "r", encoding="utf-8") as f:
+            data = json.load(f)
+        if not isinstance(data, dict):
+            return {"sessions": [], "activeId": ""}
+        sessions = data.get("sessions")
+        active_id = data.get("activeId")
+        if not isinstance(sessions, list) or not isinstance(active_id, str):
+            return {"sessions": [], "activeId": ""}
+        return {"sessions": sessions, "activeId": active_id}
+    except Exception:
+        return {"sessions": [], "activeId": ""}
+
+
+def _save_session_state(project_root: str, payload: dict) -> dict:
+    sessions = payload.get("sessions")
+    active_id = payload.get("activeId")
+    if not isinstance(sessions, list) or not isinstance(active_id, str):
+        raise HTTPException(status_code=400, detail="invalid session state payload")
+
+    path = _session_state_path(project_root)
+    temp_path = f"{path}.tmp"
+    data = {"sessions": sessions, "activeId": active_id}
+    with open(temp_path, "w", encoding="utf-8") as f:
+        json.dump(data, f, ensure_ascii=False)
+    os.replace(temp_path, path)
+    return data
+
+
 app = FastAPI(title="Generate Pictures API", version="0.1.0")
 
 app.add_middleware(
@@ -76,6 +118,21 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+
+@app.get("/session-state")
+async def get_session_state():
+    """取得目前保存的 session 狀態（前端重啟後可還原）。"""
+    project_root = _project_root()
+    return _load_session_state(project_root)
+
+
+@app.put("/session-state")
+async def put_session_state(payload: dict):
+    """覆寫保存的 session 狀態。"""
+    project_root = _project_root()
+    saved = _save_session_state(project_root, payload)
+    return {"ok": True, **saved}
 
 
 @app.post("/upload-image")

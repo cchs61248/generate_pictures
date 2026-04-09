@@ -79,6 +79,39 @@ export type RunResponse = {
   saved_files: string[]
 }
 
+export type SessionStatePayload = {
+  sessions: unknown[]
+  activeId: string
+}
+
+export async function fetchSessionState(
+  baseUrl: string,
+): Promise<SessionStatePayload | null> {
+  const res = await fetch(`${trimSlash(baseUrl)}/session-state`)
+  if (!res.ok) return null
+  const data = (await res.json()) as SessionStatePayload
+  if (!Array.isArray(data.sessions) || typeof data.activeId !== "string") {
+    return null
+  }
+  return data
+}
+
+export async function saveSessionState(
+  baseUrl: string,
+  payload: SessionStatePayload,
+): Promise<void> {
+  const res = await fetch(`${trimSlash(baseUrl)}/session-state`, {
+    method: "PUT",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload),
+  })
+  if (!res.ok) {
+    const body = await safeJson(res)
+    const detail = extractDetail(body)
+    throw new Error(detail || `儲存 session 失敗 (${res.status})`)
+  }
+}
+
 export async function runGeneration(
   userInput: string,
   baseUrl: string,

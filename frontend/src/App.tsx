@@ -3,8 +3,10 @@ import {
   type ChatMessage,
   consumeRunStream,
   deleteSessionUpload,
+  fetchSessionState,
   getApiBaseUrl,
   imageUrlsFromSavedFiles,
+  saveSessionState,
   uploadImage,
 } from "./api"
 import { loadPersistedState, savePersistedState } from "./chatStorage"
@@ -72,6 +74,7 @@ export default function App() {
   const [inputPreviewActive, setInputPreviewActive] = useState(false)
   const [samplePreviewEpoch, setSamplePreviewEpoch] = useState(0)
   const [serverReady, setServerReady] = useState(false)
+  const [hydratedFromServer, setHydratedFromServer] = useState(false)
   const runControllersRef = useRef<Map<string, AbortController>>(new Map())
   /** 由 ChatWindow 註冊：切換／新建對話前先寫入目前訊息區捲動位置 */
   const messagesScrollFlushRef = useRef<() => void>(() => {})
@@ -100,8 +103,38 @@ export default function App() {
   }, [])
 
   useEffect(() => {
+    let cancelled = false
+    void (async () => {
+      try {
+        const remote = await fetchSessionState(baseUrl)
+        if (!remote || cancelled) return
+        setBoth((prev) => {
+          const remoteSessions = remote.sessions as ChatSession[]
+          if (!remoteSessions.length) return prev
+          const activeOk = remoteSessions.some((s) => s.id === remote.activeId)
+          return {
+            sessions: remoteSessions,
+            activeId: activeOk ? remote.activeId : remoteSessions[0].id,
+          }
+        })
+      } catch {
+        // 後端無法載入時，回退本地 localStorage
+      } finally {
+        if (!cancelled) setHydratedFromServer(true)
+      }
+    })()
+    return () => {
+      cancelled = true
+    }
+  }, [baseUrl])
+
+  useEffect(() => {
     savePersistedState({ sessions, activeId })
-  }, [sessions, activeId])
+    if (!hydratedFromServer) return
+    void saveSessionState(baseUrl, { sessions, activeId }).catch(() => {
+      // 後端暫時不可用時保留本地狀態，不阻斷操作
+    })
+  }, [activeId, baseUrl, hydratedFromServer, sessions])
 
   const activeSession = useMemo(
     () => sessions.find((s) => s.id === activeId),
