@@ -9,6 +9,28 @@ from core.progress import GROUP_STAGE1_TOOLS, get_progress_bus
 
 TAVILY_SEARCH_URL = "https://api.tavily.com/search"
 
+# LLM automatic_function_calling 單次對話中，search_web 實際查詢次數上限（不含觸發上限時的回傳訊息）。
+MAX_LLM_SEARCH_CALLS = 4
+
+
+def make_bounded_search_web(max_calls: int | None = None):
+    """包一層計數器，超過上限時不再打外部搜尋 API，避免 LLM 反覆搜尋。"""
+    limit = max_calls if max_calls is not None else MAX_LLM_SEARCH_CALLS
+    used = 0
+
+    def bounded_search_web(query: str) -> str:
+        nonlocal used
+        if used >= limit:
+            return (
+                f"【系統】網路搜尋已達本次上限（{limit} 次），請勿再呼叫搜尋工具，"
+                "請改用圖片、使用者文字、已讀取的網頁內容與既有結果繼續整理；"
+                "資訊不足處請標注「待確認」。"
+            )
+        used += 1
+        return search_web(query)
+
+    return bounded_search_web
+
 
 def _search_tavily(query: str, api_key: str) -> str:
     response = requests.post(

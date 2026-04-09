@@ -5,7 +5,7 @@ from google.genai import types
 
 from core.config import TEXT_MODEL
 from core.progress import GROUP_STAGE1_TOOLS, ProgressBus, progress_cv
-from services.web_search import fetch_webpage, search_web
+from services.web_search import MAX_LLM_SEARCH_CALLS, fetch_webpage, make_bounded_search_web
 
 
 def _extract_urls(user_input: str) -> list[str]:
@@ -138,13 +138,15 @@ async def gather_product_info(
             )
             gathered_info = _response_text_safe(response)
         else:
+            bounded_search = make_bounded_search_web()
             info_chat = genai_client.chats.create(
                 model=TEXT_MODEL,
                 config=types.GenerateContentConfig(
-                    tools=[search_web, fetch_webpage],
+                    tools=[bounded_search, fetch_webpage],
                     automatic_function_calling=types.AutomaticFunctionCallingConfig(
                         disable=False,
-                        maximum_remote_calls=10,
+                        # 搜尋最多 MAX_LLM_SEARCH_CALLS 次（見 make_bounded_search_web）；其餘額度給 fetch_webpage
+                        maximum_remote_calls=MAX_LLM_SEARCH_CALLS + 25,
                     ),
                 ),
             )
