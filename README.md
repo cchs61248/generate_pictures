@@ -23,7 +23,8 @@
 - **`utils\json_utils.py`**：JSON 抽取、驗證與修復
 - **`prompts\json_schema.py`**：階段二 prompt
 - **`prompts\image_style.py`**：階段三 prompt
-- **`api\server.py`**：FastAPI 介面（前端串接）
+- **`api\server.py`**：FastAPI 介面（`POST /upload-image`、`POST /run`、`GET /images/...`）
+- **`frontend\`**：Vite + React + TypeScript 聊天 UI（上傳圖、送出問題、顯示產圖）
 
 ---
 
@@ -74,9 +75,19 @@ cmd.exe /c "cd /d C:\Users\dqaiot\Documents\aaron\gnerate_pictures && .venv\Scri
 
 ### Endpoint
 
+- `POST /upload-image`：上傳單張商品圖（multipart 欄位 `file`），伺服器會轉存為專案根目錄 `sample.jpg`
 - `POST /run`：觸發 pipeline
   - body 可帶：`user_input`、`stage3_only`
 - `GET /images/{filename}`：讀取輸出圖片
+- 已啟用 **CORS**（方便本機 React 開發伺服器跨域呼叫）
+
+### React 前端（`frontend\`）
+
+```bat
+cmd.exe /c "cd /d C:\Users\dqaiot\Documents\aaron\gnerate_pictures\frontend && npm install && npm run dev"
+```
+
+預設會連線至 `http://127.0.0.1:8000`。若要改後端位址，可複製 `frontend\.env.example` 為 `frontend\.env` 並設定 `VITE_API_BASE_URL`。
 
 ---
 
@@ -99,3 +110,6 @@ cmd.exe /c "cd /d C:\Users\dqaiot\Documents\aaron\gnerate_pictures && .venv\Scri
 - 階段三已支援完整跑完 P1～P9（不再只產第一張）
 - 請勿提交 `.env`
 - 若缺少 `sample.jpg`，流程會中止並提示
+
+cmd.exe /c "cd /d c:\Users\dqaiot\Documents\aaron\gnerate_pictures && .venv\Scripts\python.exe -m uvicorn api.server:app --host 127.0.0.1 --port 8000"
+cmd.exe /c "cd /d c:\Users\dqaiot\Documents\aaron\gnerate_pictures\frontend && npm run dev"

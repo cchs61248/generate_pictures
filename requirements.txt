@@ -6,3 +6,4 @@ ddgs==9.13.0
 rembg[cpu]==2.0.74
 fastapi==0.116.1
 uvicorn==0.35.0
+python-multipart==0.0.20
