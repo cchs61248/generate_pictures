@@ -6,10 +6,21 @@ export function getApiBaseUrl(): string {
 
 export type ChatRole = "user" | "assistant"
 
+/** 折疊區：工具列、系統日誌等 */
+export type CollapsibleBlock = {
+  id: string
+  title: string
+  lines: string[]
+}
+
 export type ChatMessage = {
   id: string
   role: ChatRole
   text?: string
+  /** 文字泡泡格式（預設 plain） */
+  textFormat?: "markdown" | "plain"
+  /** 可摺疊的工具／階段日誌 */
+  collapsible?: CollapsibleBlock
   /** 使用者訊息附圖（建議 data URL，避免 blob 被 revoke 後歷史訊息破圖） */
   imagePreview?: string
   /** 產生圖在後端的 URL（GET /images/...） */
@@ -17,6 +28,13 @@ export type ChatMessage = {
   /** 是否為錯誤訊息 */
   error?: boolean
 }
+
+export type StreamEvent =
+  | { type: "collapsible_init"; group_id: string; title: string }
+  | { type: "collapsible_line"; group_id: string; line: string }
+  | { type: "text_block"; format: string; content: string }
+  | { type: "complete"; saved_files: string[]; final_output_path: string }
+  | { type: "error"; detail: string }
 
 export async function uploadImage(file: File, baseUrl: string): Promise<void> {
   const form = new FormData()
@@ -56,6 +74,50 @@ export async function runGeneration(
     throw new Error(detail || `執行失敗 (${res.status})`)
   }
   return res.json() as Promise<RunResponse>
+}
+
+/** 呼叫 POST /run-stream，逐筆解析 SSE data JSON */
+export async function consumeRunStream(
+  userInput: string,
+  baseUrl: string,
+  onEvent: (event: StreamEvent) => void,
+): Promise<void> {
+  const res = await fetch(`${trimSlash(baseUrl)}/run-stream`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      user_input: userInput,
+      stage3_only: false,
+    }),
+  })
+  if (!res.ok) {
+    const body = await safeJson(res)
+    const detail = extractDetail(body)
+    throw new Error(detail || `串流請求失敗 (${res.status})`)
+  }
+  const reader = res.body?.getReader()
+  if (!reader) {
+    throw new Error("無法讀取回應本文")
+  }
+  const decoder = new TextDecoder()
+  let buffer = ""
+  while (true) {
+    const { done, value } = await reader.read()
+    if (done) break
+    buffer += decoder.decode(value, { stream: true })
+    const parts = buffer.split("\n\n")
+    buffer = parts.pop() ?? ""
+    for (const part of parts) {
+      const trimmed = part.trim()
+      if (!trimmed.startsWith("data:")) continue
+      const jsonStr = trimmed.slice(5).trimStart()
+      try {
+        onEvent(JSON.parse(jsonStr) as StreamEvent)
+      } catch {
+        /* 略過無法解析的片段 */
+      }
+    }
+  }
 }
 
 /** 將後端回傳的絕對路徑轉成可顯示的圖片 URL */

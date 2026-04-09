@@ -1,8 +1,10 @@
+import asyncio
 import json
 
 from google.genai import types
 
 from core.config import TEXT_MODEL
+from core.progress import GROUP_STAGE2_META, ProgressBus
 from prompts.json_schema import prompt_template
 from utils.json_utils import extract_json_candidate, repair_to_json_apikey, repair_to_json_webapi, validate_output
 
@@ -15,7 +17,24 @@ async def generate_json_plan(
     gemini_client,
     use_webapi: bool,
     output_json_path: str,
+    progress: ProgressBus | None = None,
 ) -> list[dict]:
+    if progress:
+        await progress.emit(
+            {
+                "type": "collapsible_init",
+                "group_id": GROUP_STAGE2_META,
+                "title": "階段二 · 格式檢查與修復",
+            }
+        )
+        await progress.emit(
+            {
+                "type": "collapsible_line",
+                "group_id": GROUP_STAGE2_META,
+                "line": "[階段二] 正在結合 prompts/json_schema.py 規範，生成最終的 AI 繪圖提示詞與文案...",
+            }
+        )
+
     print("\n[階段二] 正在結合 prompts/json_schema.py 規範，生成最終的 AI 繪圖提示詞與文案...")
 
     format_prompt = f"""
@@ -37,7 +56,8 @@ async def generate_json_plan(
         )
         raw_output = response.text or ""
     else:
-        response = genai_client.models.generate_content(
+        response = await asyncio.to_thread(
+            genai_client.models.generate_content,
             model=TEXT_MODEL,
             contents=[format_prompt, image],
             config=types.GenerateContentConfig(
@@ -56,16 +76,45 @@ async def generate_json_plan(
         if ok:
             final_data = parsed
         else:
-            print(f"\n⚠️ [格式檢查] 首次輸出未通過：{reason}")
+            msg = f"⚠️ [格式檢查] 首次輸出未通過：{reason}"
+            print(f"\n{msg}")
+            if progress:
+                await progress.emit(
+                    {
+                        "type": "collapsible_line",
+                        "group_id": GROUP_STAGE2_META,
+                        "line": msg,
+                    }
+                )
     except Exception as exc:
-        print(f"\n⚠️ [格式檢查] 首次輸出非合法 JSON：{exc}")
+        msg = f"⚠️ [格式檢查] 首次輸出非合法 JSON：{exc}"
+        print(f"\n{msg}")
+        if progress:
+            await progress.emit(
+                {
+                    "type": "collapsible_line",
+                    "group_id": GROUP_STAGE2_META,
+                    "line": msg,
+                }
+            )
 
     if final_data is None:
-        print("[修復流程] 正在嘗試二次修復輸出格式...")
+        line = "[修復流程] 正在嘗試二次修復輸出格式..."
+        print(line)
+        if progress:
+            await progress.emit(
+                {
+                    "type": "collapsible_line",
+                    "group_id": GROUP_STAGE2_META,
+                    "line": line,
+                }
+            )
         if use_webapi:
             repaired = await repair_to_json_webapi(gemini_client, raw_output)
         else:
-            repaired = repair_to_json_apikey(genai_client, raw_output)
+            repaired = await asyncio.to_thread(
+                repair_to_json_apikey, genai_client, raw_output
+            )
         ok, reason = validate_output(repaired)
         if not ok:
             raise ValueError(f"修復後仍不符合 JSON 規範：{reason}")
@@ -79,4 +128,20 @@ async def generate_json_plan(
     with open(output_json_path, "w", encoding="utf-8") as file:
         json.dump(final_data, file, ensure_ascii=False, indent=2)
     print(f"💾 [JSON 已儲存] {output_json_path}")
+    if progress:
+        await progress.emit(
+            {
+                "type": "collapsible_line",
+                "group_id": GROUP_STAGE2_META,
+                "line": f"💾 [JSON 已儲存] {output_json_path}",
+            }
+        )
+        json_text = json.dumps(final_data, ensure_ascii=False, indent=2)
+        await progress.emit(
+            {
+                "type": "text_block",
+                "format": "markdown",
+                "content": f"🤖 **[最終輸出] JSON**\n\n```json\n{json_text}\n```",
+            }
+        )
     return final_data

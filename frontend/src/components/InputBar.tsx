@@ -10,6 +10,10 @@ type Props = {
   /** 已成功上傳的檔名（送出後預覽收回時仍顯示） */
   uploadedFileName: string | null
   previewUrl: string | null
+  /** 上傳成功後的 data URL 預覽（與 blob 擇一顯示） */
+  inputPreviewDataUrl: string | null
+  /** 無 blob／data 時改載入後端 sample.jpg（仍在上傳與送出之間） */
+  fallbackSamplePreviewUrl: string | null
   onFileChange: (file: File | null) => void
   uploading: boolean
 }
@@ -22,9 +26,13 @@ export function InputBar({
   file,
   uploadedFileName,
   previewUrl,
+  inputPreviewDataUrl,
+  fallbackSamplePreviewUrl,
   onFileChange,
   uploading,
 }: Props) {
+  const thumbSrc =
+    previewUrl ?? inputPreviewDataUrl ?? fallbackSamplePreviewUrl ?? null
   const inputId = useId()
   const fileRef = useRef<HTMLInputElement>(null)
 
@@ -52,9 +60,9 @@ export function InputBar({
 
   return (
     <div className="input-bar">
-      {previewUrl && (
+      {thumbSrc ? (
         <div className="input-preview">
-          <img src={previewUrl} alt="" className="input-preview-img" />
+          <img src={thumbSrc} alt="" className="input-preview-img" />
           <button
             type="button"
             className="input-preview-remove"
@@ -65,7 +73,7 @@ export function InputBar({
           </button>
           {uploading && <span className="input-preview-badge">上傳中…</span>}
         </div>
-      )}
+      ) : null}
       <div className="input-row">
         <input
           ref={fileRef}

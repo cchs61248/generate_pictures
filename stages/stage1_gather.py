@@ -1,8 +1,10 @@
+import asyncio
 import re
 
 from google.genai import types
 
 from core.config import TEXT_MODEL
+from core.progress import GROUP_STAGE1_TOOLS, ProgressBus, progress_cv
 from services.web_search import fetch_webpage, search_web
 
 
@@ -25,7 +27,26 @@ async def gather_product_info(
     genai_client,
     gemini_client,
     use_webapi: bool,
+    progress: ProgressBus | None = None,
 ) -> str:
+    ctx_token = None
+    if progress:
+        await progress.emit(
+            {
+                "type": "collapsible_init",
+                "group_id": GROUP_STAGE1_TOOLS,
+                "title": "階段一 · 工具與系統提示",
+            }
+        )
+        await progress.emit(
+            {
+                "type": "collapsible_line",
+                "group_id": GROUP_STAGE1_TOOLS,
+                "line": "[階段一] 正在分析圖片與聯網收集商品資訊，請稍候...",
+            }
+        )
+        ctx_token = progress_cv.set(progress)
+
     print("\n[階段一] 正在分析圖片與聯網收集商品資訊，請稍候...")
     dedup_urls = _extract_urls(user_input)
 
@@ -87,29 +108,45 @@ async def gather_product_info(
 請盡可能查詢最新且準確的台灣在地資訊，若搜尋不到特定資料請標注「待確認」。
 """
 
-    if use_webapi:
-        response = await gemini_client.generate_content(
-            info_prompt,
-            model="gemini-3-flash-thinking",
-            files=[image_path],
-        )
-        gathered_info = response.text or ""
-    else:
-        info_chat = genai_client.chats.create(
-            model=TEXT_MODEL,
-            config=types.GenerateContentConfig(
-                tools=[search_web, fetch_webpage],
-                automatic_function_calling=types.AutomaticFunctionCallingConfig(
-                    disable=False,
-                    maximum_remote_calls=10,
+    try:
+        if use_webapi:
+            response = await gemini_client.generate_content(
+                info_prompt,
+                model="gemini-3-flash-thinking",
+                files=[image_path],
+            )
+            gathered_info = response.text or ""
+        else:
+            info_chat = genai_client.chats.create(
+                model=TEXT_MODEL,
+                config=types.GenerateContentConfig(
+                    tools=[search_web, fetch_webpage],
+                    automatic_function_calling=types.AutomaticFunctionCallingConfig(
+                        disable=False,
+                        maximum_remote_calls=10,
+                    ),
                 ),
-            ),
-        )
-        response = info_chat.send_message([info_prompt, image])
-        gathered_info = response.text or ""
+            )
+            # send_message 為同步長時間呼叫，須移出事件迴圈以免 SSE 進度無法即時推送
+            response = await asyncio.to_thread(
+                info_chat.send_message,
+                [info_prompt, image],
+            )
+            gathered_info = response.text or ""
 
-    print("\n✅ [階段一完成] 收集到的商品資訊如下：")
-    print("-" * 40)
-    print(gathered_info)
-    print("-" * 40)
-    return gathered_info
+        print("\n✅ [階段一完成] 收集到的商品資訊如下：")
+        print("-" * 40)
+        print(gathered_info)
+        print("-" * 40)
+        if progress:
+            md = (
+                "✅ **[階段一完成]** 收集到的商品資訊如下：\n\n---\n\n"
+                f"{gathered_info}"
+            )
+            await progress.emit(
+                {"type": "text_block", "format": "markdown", "content": md}
+            )
+        return gathered_info
+    finally:
+        if ctx_token is not None:
+            progress_cv.reset(ctx_token)

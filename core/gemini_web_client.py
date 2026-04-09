@@ -17,6 +17,7 @@ GeneratedImage.data    # bytes：PNG 圖片原始 bytes
 
 from __future__ import annotations
 
+import asyncio
 import hashlib
 import io
 import json
@@ -232,7 +233,7 @@ class GeminiWebClient:
         if not self._at_token or not self._f_sid:
             print("[GeminiWebClient] 自動取得 at token 與 f.sid...")
             try:
-                at, f_sid, bl = _fetch_at_token(self._session)
+                at, f_sid, bl = await asyncio.to_thread(_fetch_at_token, self._session)
                 if at:
                     self._at_token = at
                     print(f"[GeminiWebClient] at token 已取得：{at[:20]}...")
@@ -274,6 +275,20 @@ class GeminiWebClient:
         """
         if self._session is None:
             await self.init()
+
+        # requests 為同步 I/O；在 asyncio 內直接呼叫會卡住事件迴圈，導致 SSE 無法即時送出。
+        return await asyncio.to_thread(
+            self._generate_content_sync, prompt, files, private_mode
+        )
+
+    def _generate_content_sync(
+        self,
+        prompt: str,
+        files: Optional[list[str]],
+        private_mode: bool,
+    ) -> GeminiResponse:
+        if self._session is None:
+            raise RuntimeError("GeminiWebClient 尚未初始化")
 
         session = self._session
         image_path = files[0] if files else None

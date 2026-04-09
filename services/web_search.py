@@ -2,9 +2,17 @@ import requests
 from bs4 import BeautifulSoup
 from ddgs import DDGS
 
+from core.progress import GROUP_STAGE1_TOOLS, get_progress_bus
+
 
 def search_web(query: str) -> str:
-    print(f"\n👉 [系統提示] 觸發搜尋工具，關鍵字: {query}")
+    line = f"👉 [系統提示] 觸發搜尋工具，關鍵字: {query}"
+    print(f"\n{line}")
+    bus = get_progress_bus()
+    if bus:
+        bus.emit_sync(
+            {"type": "collapsible_line", "group_id": GROUP_STAGE1_TOOLS, "line": line}
+        )
     try:
         results = DDGS().text(query, max_results=3)
         return str(results)
@@ -13,7 +21,13 @@ def search_web(query: str) -> str:
 
 
 def fetch_webpage(url: str) -> str:
-    print(f"\n👉 [系統提示] 觸發網頁讀取工具，正在訪問網址: {url}")
+    line = f"👉 [系統提示] 觸發網頁讀取工具，正在訪問網址: {url}"
+    print(f"\n{line}")
+    bus = get_progress_bus()
+    if bus:
+        bus.emit_sync(
+            {"type": "collapsible_line", "group_id": GROUP_STAGE1_TOOLS, "line": line}
+        )
     try:
         headers = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)"}
         response = requests.get(url, headers=headers, timeout=10)

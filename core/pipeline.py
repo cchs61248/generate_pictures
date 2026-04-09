@@ -5,13 +5,18 @@ from PIL import Image
 
 from core.clients import build_clients
 from core.config import AppConfig
+from core.progress import ProgressBus
 from stages.stage1_gather import gather_product_info
 from stages.stage2_json import generate_json_plan
 from stages.stage3_image import generate_all_images
 from utils.json_utils import validate_output
 
 
-async def run_pipeline(config: AppConfig, user_input: str | None = None) -> dict:
+async def run_pipeline(
+    config: AppConfig,
+    user_input: str | None = None,
+    progress: ProgressBus | None = None,
+) -> dict:
     require_text_client = not config.stage3_only_mode
     require_image_client = True
     clients = await build_clients(config, require_text_client, require_image_client)
@@ -42,6 +47,7 @@ async def run_pipeline(config: AppConfig, user_input: str | None = None) -> dict
             genai_client=clients.genai_client,
             gemini_client=clients.gemini_client,
             use_webapi=config.use_webapi,
+            progress=progress,
         )
         final_data = await generate_json_plan(
             gathered_info=gathered_info,
@@ -51,6 +57,7 @@ async def run_pipeline(config: AppConfig, user_input: str | None = None) -> dict
             gemini_client=clients.gemini_client,
             use_webapi=config.use_webapi,
             output_json_path=config.final_output_path,
+            progress=progress,
         )
 
     saved_files = await generate_all_images(
@@ -62,6 +69,7 @@ async def run_pipeline(config: AppConfig, user_input: str | None = None) -> dict
         gemini_client=clients.gemini_client,
         use_webapi=config.use_webapi,
         use_hybrid=config.use_hybrid,
+        progress=progress,
     )
 
     return {

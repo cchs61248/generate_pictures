@@ -1,8 +1,10 @@
+import asyncio
 import io
 import os
 
 from PIL import Image
 
+from core.progress import GROUP_STAGE3_META, ProgressBus
 from prompts.image_style import prompt_template as picture_style_template
 from services.image_gen import generate_image_with_retry, generate_image_webapi
 from services.image_process import build_safe_name, compose_image_prompt
@@ -43,7 +45,24 @@ async def generate_all_images(
     gemini_client,
     use_webapi: bool,
     use_hybrid: bool,
+    progress: ProgressBus | None = None,
 ) -> list[str]:
+    if progress:
+        await progress.emit(
+            {
+                "type": "collapsible_init",
+                "group_id": GROUP_STAGE3_META,
+                "title": "階段三 · 產圖日誌",
+            }
+        )
+        await progress.emit(
+            {
+                "type": "collapsible_line",
+                "group_id": GROUP_STAGE3_META,
+                "line": "[階段三] 正在為每張圖生成 AI 圖片，請稍候...",
+            }
+        )
+
     print("\n[階段三] 正在為每張圖生成 AI 圖片，請稍候...")
     os.makedirs(picture_dir, exist_ok=True)
 
@@ -53,7 +72,16 @@ async def generate_all_images(
         main_name = item["main"]
         image_prompt = compose_image_prompt(picture_style_template, item)
         safe_name = build_safe_name(main_name)
-        print(f"\n🎨 [P{sort_num:02d}] 正在生成：{main_name} ...")
+        line_gen = f"🎨 [P{sort_num:02d}] 正在生成：{main_name} ..."
+        print(f"\n{line_gen}")
+        if progress:
+            await progress.emit(
+                {
+                    "type": "collapsible_line",
+                    "group_id": GROUP_STAGE3_META,
+                    "line": line_gen,
+                }
+            )
 
         try:
             raw_image = None
@@ -64,7 +92,16 @@ async def generate_all_images(
                     image_path,
                 )
                 if not generated_images:
-                    print(f"  ⚠️  P{sort_num:02d} Web API 產圖未取得圖片（Gemini 未生成圖片），跳過。")
+                    w = f"  ⚠️  P{sort_num:02d} Web API 產圖未取得圖片（Gemini 未生成圖片），跳過。"
+                    print(w)
+                    if progress:
+                        await progress.emit(
+                            {
+                                "type": "collapsible_line",
+                                "group_id": GROUP_STAGE3_META,
+                                "line": w.strip(),
+                            }
+                        )
                     continue
                 generated_image = generated_images[0]
                 raw_image = _extract_pil_image(generated_image)
@@ -75,7 +112,12 @@ async def generate_all_images(
                         f"Web API 產圖格式不支援，型別={type(generated_image).__name__}，可見屬性: {preview}"
                     )
             else:
-                response = generate_image_with_retry(genai_client, image_prompt, image)
+                response = await asyncio.to_thread(
+                    generate_image_with_retry,
+                    genai_client,
+                    image_prompt,
+                    image,
+                )
                 for part in response.parts:
                     if part.inline_data is not None:
                         raw_image = Image.open(io.BytesIO(part.inline_data.data))
@@ -83,21 +125,58 @@ async def generate_all_images(
                         break
 
             if raw_image is None:
-                print(f"  ⚠️  P{sort_num:02d} 未取得圖片內容，跳過。")
+                w = f"  ⚠️  P{sort_num:02d} 未取得圖片內容，跳過。"
+                print(w)
+                if progress:
+                    await progress.emit(
+                        {
+                            "type": "collapsible_line",
+                            "group_id": GROUP_STAGE3_META,
+                            "line": w.strip(),
+                        }
+                    )
                 continue
 
             resized = raw_image.resize((1000, 1000), Image.LANCZOS)
             filename = f"P{sort_num:02d}_{safe_name}.png"
             file_path = os.path.join(picture_dir, filename)
             resized.save(file_path, "PNG")
-            print(f"  ✅ 已儲存（1000×1000）：{file_path}")
+            ok_line = f"  ✅ 已儲存（1000×1000）：{file_path}"
+            print(ok_line)
+            if progress:
+                await progress.emit(
+                    {
+                        "type": "collapsible_line",
+                        "group_id": GROUP_STAGE3_META,
+                        "line": ok_line.strip(),
+                    }
+                )
             saved_files.append(file_path)
         except Exception as exc:
-            print(f"  ❌ P{sort_num:02d} 圖片生成失敗：{exc}")
+            err = f"  ❌ P{sort_num:02d} 圖片生成失敗：{exc}"
+            print(err)
+            if progress:
+                await progress.emit(
+                    {
+                        "type": "collapsible_line",
+                        "group_id": GROUP_STAGE3_META,
+                        "line": err.strip(),
+                    }
+                )
         break
     if saved_files:
-        print("\n✅ [階段三完成] 所有圖片已儲存至 picture/ 資料夾。")
+        done_msg = "✅ [階段三完成] 所有圖片已儲存至 picture/ 資料夾。"
+        print(f"\n{done_msg}")
     else:
-        print("\n⚠️ [階段三完成] 本次未成功儲存任何圖片。")
+        done_msg = "⚠️ [階段三完成] 本次未成功儲存任何圖片。"
+        print(f"\n{done_msg}")
+    if progress:
+        await progress.emit(
+            {
+                "type": "collapsible_line",
+                "group_id": GROUP_STAGE3_META,
+                "line": done_msg,
+            }
+        )
 
     return saved_files

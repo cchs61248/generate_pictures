@@ -60,3 +60,4 @@ plans/
 *.png
 *.jpg
 __init__.py
+*.yml

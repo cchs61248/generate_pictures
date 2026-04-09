@@ -4,15 +4,17 @@ import { MessageBubble } from "./Message"
 
 type Props = {
   messages: ChatMessage[]
-  loading: boolean
+  /** 串流進行中且尚未收到任何後端事件時，顯示簡短連線提示（不使用三點動畫佔滿） */
+  streaming: boolean
+  streamPrimed: boolean
 }
 
-export function ChatWindow({ messages, loading }: Props) {
+export function ChatWindow({ messages, streaming, streamPrimed }: Props) {
   const bottomRef = useRef<HTMLDivElement>(null)
 
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: "smooth" })
-  }, [messages, loading])
+  }, [messages, streaming, streamPrimed])
 
   return (
     <div className="chat-window">
@@ -28,15 +30,11 @@ export function ChatWindow({ messages, loading }: Props) {
         {messages.map((m) => (
           <MessageBubble key={m.id} message={m} />
         ))}
-        {loading && (
+        {streaming && !streamPrimed ? (
           <div className="msg-row msg-row--assistant">
-            <div className="msg-bubble msg-bubble--assistant msg-bubble--typing">
-              <span className="typing-dot" />
-              <span className="typing-dot" />
-              <span className="typing-dot" />
-            </div>
+            <p className="msg-stream-hint">已連線，等待階段輸出…</p>
           </div>
-        )}
+        ) : null}
         <div ref={bottomRef} />
       </div>
     </div>

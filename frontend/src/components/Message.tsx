@@ -8,11 +8,14 @@ export function MessageBubble({ message }: Props) {
   const isUser = message.role === "user"
 
   if (isUser) {
+    const hasImage = Boolean(message.imagePreview)
+    const hasText = Boolean(message.text)
+
     return (
       <div className="msg-row msg-row--user">
         <div className="msg-user-stack">
-          <div className="msg-bubble msg-bubble--user">
-            {message.imagePreview ? (
+          {hasImage ? (
+            <div className="msg-bubble msg-bubble--user msg-bubble--user-image">
               <div className="msg-user-inline-img-wrap">
                 <img
                   src={message.imagePreview}
@@ -22,15 +25,20 @@ export function MessageBubble({ message }: Props) {
                   decoding="async"
                 />
               </div>
-            ) : null}
-            {message.text ? (
+            </div>
+          ) : null}
+          {hasText ? (
+            <div className="msg-bubble msg-bubble--user">
               <p className="msg-text msg-text--user">{message.text}</p>
-            ) : null}
-          </div>
+            </div>
+          ) : null}
         </div>
       </div>
     )
   }
+
+  const textFormat = message.textFormat ?? "plain"
+  const isMd = textFormat === "markdown"
 
   return (
     <div className="msg-row msg-row--assistant">
@@ -38,7 +46,32 @@ export function MessageBubble({ message }: Props) {
         className={`msg-bubble msg-bubble--assistant ${message.error ? "msg-bubble--error" : ""}`}
       >
         <span className="msg-label msg-label--assistant">AI</span>
-        {message.text ? <p className="msg-text">{message.text}</p> : null}
+        {message.collapsible ? (
+          <details className="msg-collapsible">
+            <summary className="msg-collapsible-summary">
+              <span className="msg-collapsible-title">
+                {message.collapsible.title}
+              </span>
+              <span className="msg-collapsible-meta">
+                {message.collapsible.lines.length} 行
+              </span>
+            </summary>
+            <pre className="msg-collapsible-body">
+              {message.collapsible.lines.join("\n")}
+            </pre>
+          </details>
+        ) : null}
+        {message.text ? (
+          <div
+            className={
+              isMd
+                ? "msg-text msg-text--markdown"
+                : "msg-text"
+            }
+          >
+            {message.text}
+          </div>
+        ) : null}
         {message.generatedImages && message.generatedImages.length > 0 ? (
           <div className="msg-generated">
             <p className="msg-generated-title">產生的圖片</p>

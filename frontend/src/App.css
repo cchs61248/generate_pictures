@@ -1,18 +1,23 @@
 /* Gemini 風格：深底、使用者灰泡泡、附圖在文字上方 */
 .app-root {
-  min-height: 100vh;
+  flex: 1;
+  min-height: 0;
+  height: 100%;
   display: flex;
   flex-direction: column;
+  overflow: hidden;
   background: #131314;
   color: #e3e3e3;
 }
 
 .app-shell {
   display: flex;
+  flex-direction: row;
   flex: 1;
-  min-height: 100vh;
+  min-height: 0;
   min-width: 0;
   position: relative;
+  overflow: hidden;
 }
 
 .sidebar-backdrop {
@@ -22,8 +27,10 @@
 .app-chat-column {
   flex: 1;
   min-width: 0;
+  min-height: 0;
   display: flex;
   flex-direction: column;
+  overflow: hidden;
   background: #131314;
 }
 
@@ -78,29 +85,33 @@
 
 .app-main {
   flex: 1;
+  min-height: 0;
   display: flex;
   flex-direction: column;
+  overflow: hidden;
   max-width: 880px;
   width: 100%;
   margin: 0 auto;
   padding: 0 1rem 1rem;
-  min-height: 0;
 }
 
 /* 左側欄（Gemini 風） */
 .sidebar {
   width: 272px;
   flex-shrink: 0;
+  align-self: stretch;
+  height: 100%;
+  min-height: 0;
   background: #1e1e1e;
   border-right: 1px solid rgba(255, 255, 255, 0.08);
   display: flex;
   flex-direction: column;
-  min-height: 100vh;
   padding: 0.5rem 0.65rem 1rem;
   overflow: hidden;
 }
 
 .sidebar-top {
+  flex-shrink: 0;
   display: flex;
   align-items: center;
   width: 100%;
@@ -140,6 +151,7 @@
 }
 
 .sidebar-new-chat {
+  flex-shrink: 0;
   display: flex;
   align-items: center;
   gap: 0.65rem;
@@ -166,6 +178,7 @@
 }
 
 .sidebar-section-label {
+  flex-shrink: 0;
   margin: 0.35rem 0 0.4rem 0.5rem;
   font-size: 0.72rem;
   font-weight: 600;
@@ -179,8 +192,10 @@
   margin: 0;
   padding: 0;
   overflow-y: auto;
+  overscroll-behavior: contain;
   flex: 1;
   min-height: 0;
+  -webkit-overflow-scrolling: touch;
 }
 
 .sidebar-item {
@@ -317,6 +332,8 @@
     left: 0;
     top: 0;
     bottom: 0;
+    height: auto;
+    max-height: 100dvh;
     z-index: 19;
     transform: translateX(-100%);
     transition: transform 0.22s ease;
@@ -346,7 +363,7 @@
 /* Chat */
 .chat-window {
   flex: 1;
-  min-height: 280px;
+  min-height: 0;
   overflow: hidden;
   display: flex;
   flex-direction: column;
@@ -354,11 +371,14 @@
 
 .chat-messages {
   flex: 1;
+  min-height: 0;
   overflow-y: auto;
+  overscroll-behavior: contain;
   padding: 1rem 0;
   display: flex;
   flex-direction: column;
   gap: 0.75rem;
+  -webkit-overflow-scrolling: touch;
 }
 
 .chat-empty {
@@ -395,13 +415,14 @@
   justify-content: flex-start;
 }
 
-/* 使用者：單一泡泡，圖在右上、文字在下（參考 Gemini） */
+/* 使用者泡泡 */
 .msg-user-stack {
   display: flex;
   flex-direction: column;
   align-items: flex-end;
   max-width: min(94%, 560px);
   width: 100%;
+  gap: 0.45rem;
 }
 
 .msg-bubble {
@@ -427,13 +448,19 @@
 }
 
 .msg-user-inline-img-wrap {
-  align-self: flex-end;
-  max-width: min(220px, 72vw);
+  align-self: flex-start;
+  max-width: min(240px, 72vw);
   border-radius: 16px;
   overflow: hidden;
   border: 1px solid rgba(255, 255, 255, 0.12);
   background: #fff;
   box-shadow: 0 1px 4px rgba(0, 0, 0, 0.2);
+}
+
+.msg-bubble--user-image {
+  width: auto;
+  max-width: min(92%, 260px);
+  padding: 0.5rem;
 }
 
 .msg-user-inline-img {
@@ -475,6 +502,72 @@
   line-height: 1.55;
   white-space: pre-wrap;
   word-break: break-word;
+}
+
+.msg-text--markdown {
+  margin: 0;
+  font-size: 0.9rem;
+  line-height: 1.55;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.msg-collapsible {
+  margin: 0 0 0.75rem 0;
+  border-radius: 0.65rem;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  background: rgba(0, 0, 0, 0.22);
+  overflow: hidden;
+}
+
+.msg-collapsible-summary {
+  cursor: pointer;
+  list-style: none;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+  padding: 0.55rem 0.75rem;
+  font-size: 0.85rem;
+  color: rgba(227, 227, 227, 0.88);
+  user-select: none;
+}
+
+.msg-collapsible-summary::-webkit-details-marker {
+  display: none;
+}
+
+.msg-collapsible-title {
+  flex: 1;
+  min-width: 0;
+}
+
+.msg-collapsible-meta {
+  flex-shrink: 0;
+  font-size: 0.72rem;
+  opacity: 0.5;
+}
+
+.msg-collapsible-body {
+  margin: 0;
+  padding: 0.65rem 0.75rem;
+  max-height: min(280px, 40vh);
+  overflow: auto;
+  font-family: ui-monospace, "Cascadia Mono", monospace;
+  font-size: 0.78rem;
+  line-height: 1.45;
+  white-space: pre-wrap;
+  word-break: break-word;
+  color: rgba(227, 227, 227, 0.78);
+  border-top: 1px solid rgba(255, 255, 255, 0.06);
+  background: rgba(0, 0, 0, 0.18);
+}
+
+.msg-stream-hint {
+  margin: 0;
+  padding: 0.35rem 0.5rem;
+  font-size: 0.85rem;
+  color: rgba(227, 227, 227, 0.42);
 }
 
 .msg-generated {
@@ -697,4 +790,50 @@
   margin: 0.4rem 0 0;
   font-size: 0.75rem;
   color: rgba(232, 238, 245, 0.4);
+}
+
+/* 深色主題捲動條：與頁面視覺一致、低突兀 */
+.chat-messages,
+.sidebar-list,
+.msg-collapsible-body {
+  scrollbar-width: thin;
+  scrollbar-color: rgba(227, 227, 227, 0.28) rgba(255, 255, 255, 0.04);
+}
+
+.chat-messages::-webkit-scrollbar,
+.sidebar-list::-webkit-scrollbar,
+.msg-collapsible-body::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+
+.chat-messages::-webkit-scrollbar-track,
+.sidebar-list::-webkit-scrollbar-track,
+.msg-collapsible-body::-webkit-scrollbar-track {
+  background: rgba(255, 255, 255, 0.04);
+  border-radius: 999px;
+}
+
+.chat-messages::-webkit-scrollbar-thumb,
+.sidebar-list::-webkit-scrollbar-thumb,
+.msg-collapsible-body::-webkit-scrollbar-thumb {
+  background: linear-gradient(
+    180deg,
+    rgba(168, 199, 250, 0.45),
+    rgba(168, 199, 250, 0.25)
+  );
+  border: 2px solid rgba(0, 0, 0, 0);
+  background-clip: padding-box;
+  border-radius: 999px;
+  min-height: 36px;
+}
+
+.chat-messages::-webkit-scrollbar-thumb:hover,
+.sidebar-list::-webkit-scrollbar-thumb:hover,
+.msg-collapsible-body::-webkit-scrollbar-thumb:hover {
+  background: linear-gradient(
+    180deg,
+    rgba(168, 199, 250, 0.62),
+    rgba(168, 199, 250, 0.38)
+  );
 }

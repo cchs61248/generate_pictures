@@ -1,9 +1,9 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react"
+import { useCallback, useEffect, useMemo, useState } from "react"
 import {
   type ChatMessage,
+  consumeRunStream,
   getApiBaseUrl,
   imageUrlsFromSavedFiles,
-  runGeneration,
   uploadImage,
 } from "./api"
 import { loadPersistedState, savePersistedState } from "./chatStorage"
@@ -13,6 +13,7 @@ import { Sidebar } from "./components/Sidebar"
 import { readFileAsDataUrl } from "./readFileAsDataUrl"
 import { titleFromMessages } from "./titleUtils"
 import { DEFAULT_SESSION_TITLE, type ChatSession } from "./types/chatSession"
+import { useObjectUrlForFile } from "./useObjectUrlForFile"
 import "./App.css"
 
 function newId(): string {
@@ -41,18 +42,33 @@ function initialState(): { sessions: ChatSession[]; activeId: string } {
   return { sessions: [s], activeId: s.id }
 }
 
+async function cloneFileDetached(file: File): Promise<File> {
+  const buf = await file.arrayBuffer()
+  return new File([buf], file.name, {
+    type: file.type || "application/octet-stream",
+    lastModified: Date.now(),
+  })
+}
+
 export default function App() {
   const baseUrl = getApiBaseUrl()
   const [{ sessions, activeId }, setBoth] = useState(() => initialState())
   const [inputText, setInputText] = useState("")
   const [file, setFile] = useState<File | null>(null)
-  const [previewUrl, setPreviewUrl] = useState<string | null>(null)
-  const previewUrlRef = useRef<string | null>(null)
+  const fileObjectUrl = useObjectUrlForFile(file)
   const [uploading, setUploading] = useState(false)
   /** 最近一次成功上傳的檔名（收起預覽後仍顯示「已選：…」） */
   const [uploadedFileName, setUploadedFileName] = useState<string | null>(null)
+  /** 上傳成功後保留在輸入區的預覽（data URL），直到送出或移除；不受 blob revoke 影響 */
+  const [inputPreviewDataUrl, setInputPreviewDataUrl] = useState<string | null>(
+    null,
+  )
+  /** 從「本次成功上傳」到「送出」之間為 true，用後端 sample 圖做預覽後備（並在送出後關閉） */
+  const [inputPreviewActive, setInputPreviewActive] = useState(false)
+  const [samplePreviewEpoch, setSamplePreviewEpoch] = useState(0)
   const [serverReady, setServerReady] = useState(false)
-  const [loading, setLoading] = useState(false)
+  const [streaming, setStreaming] = useState(false)
+  const [streamPrimed, setStreamPrimed] = useState(false)
   const [sidebarOpen, setSidebarOpen] = useState(() =>
     typeof window !== "undefined" ? window.innerWidth > 900 : true,
   )
@@ -84,6 +100,26 @@ export default function App() {
   )
   const messages = activeSession?.messages ?? []
 
+  const fallbackSamplePreviewUrl = useMemo(() => {
+    if (!serverReady) return null
+    // 本地仍有 File 時由 blob URL 顯示，避免在 object URL 就緒前閃爍後端舊圖
+    if (file) return null
+    if (!uploadedFileName) return null
+    if (fileObjectUrl || inputPreviewDataUrl) return null
+    if (!inputPreviewActive) return null
+    const base = baseUrl.replace(/\/+$/, "")
+    return `${base}/sample-reference?v=${samplePreviewEpoch}`
+  }, [
+    baseUrl,
+    file,
+    fileObjectUrl,
+    inputPreviewActive,
+    inputPreviewDataUrl,
+    samplePreviewEpoch,
+    serverReady,
+    uploadedFileName,
+  ])
+
   const patchActiveMessages = useCallback(
     (fn: (prev: ChatMessage[]) => ChatMessage[]) => {
       setSessions((prev) =>
@@ -103,22 +139,14 @@ export default function App() {
     [activeId, setSessions],
   )
 
-  const revokePreview = useCallback(() => {
-    const prev = previewUrlRef.current
-    if (prev && prev.startsWith("blob:")) {
-      URL.revokeObjectURL(prev)
-    }
-    previewUrlRef.current = null
-    setPreviewUrl(null)
-  }, [])
-
   const resetInputAndUpload = useCallback(() => {
     setInputText("")
-    revokePreview()
     setFile(null)
     setUploadedFileName(null)
+    setInputPreviewDataUrl(null)
+    setInputPreviewActive(false)
     setServerReady(false)
-  }, [revokePreview])
+  }, [])
 
   const handleNewChat = useCallback(() => {
     const s = createSession()
@@ -163,27 +191,36 @@ export default function App() {
   const handleFileChange = useCallback(
     async (next: File | null) => {
       if (!next) {
-        revokePreview()
         setFile(null)
         setUploadedFileName(null)
+        setInputPreviewDataUrl(null)
+        setInputPreviewActive(false)
         return
       }
 
-      revokePreview()
-      setFile(next)
-      const url = URL.createObjectURL(next)
-      previewUrlRef.current = url
-      setPreviewUrl(url)
+      const detached = await cloneFileDetached(next)
+      setInputPreviewDataUrl(null)
+      setInputPreviewActive(false)
+      setFile(detached)
       setUploading(true)
       try {
-        await uploadImage(next, baseUrl)
-        setUploadedFileName(next.name)
+        await uploadImage(detached, baseUrl)
+        setUploadedFileName(detached.name)
         setServerReady(true)
+        setInputPreviewActive(true)
+        setSamplePreviewEpoch((e) => e + 1)
+        try {
+          const dataUrl = await readFileAsDataUrl(detached)
+          setInputPreviewDataUrl(dataUrl)
+        } catch {
+          setInputPreviewDataUrl(null)
+        }
       } catch (e) {
         const msg = e instanceof Error ? e.message : String(e)
-        revokePreview()
         setFile(null)
         setUploadedFileName(null)
+        setInputPreviewDataUrl(null)
+        setInputPreviewActive(false)
         patchActiveMessages((m) => [
           ...m,
           {
@@ -198,7 +235,7 @@ export default function App() {
         setUploading(false)
       }
     },
-    [baseUrl, patchActiveMessages, revokePreview],
+    [baseUrl, patchActiveMessages],
   )
 
   const handleSend = useCallback(async () => {
@@ -224,6 +261,9 @@ export default function App() {
         imageSnapshot = undefined
       }
     }
+    if (!imageSnapshot && inputPreviewDataUrl) {
+      imageSnapshot = inputPreviewDataUrl
+    }
 
     const userMsg: ChatMessage = {
       id: newId(),
@@ -233,27 +273,90 @@ export default function App() {
     }
     patchActiveMessages((m) => [...m, userMsg])
     setInputText("")
-    revokePreview()
     setFile(null)
-    setLoading(true)
+    setUploadedFileName(null)
+    setInputPreviewDataUrl(null)
+    setInputPreviewActive(false)
+    setStreaming(true)
+    setStreamPrimed(false)
 
     try {
-      const result = await runGeneration(text, baseUrl)
-      const urls = imageUrlsFromSavedFiles(result.saved_files ?? [], baseUrl)
-      const assistantText =
-        urls.length > 0
-          ? "圖片生成完成，請檢視下方結果。"
-          : "流程已結束，但未取得產出圖片（請檢查後端日誌或設定）。"
-
-      patchActiveMessages((m) => [
-        ...m,
-        {
-          id: newId(),
-          role: "assistant",
-          text: assistantText,
-          generatedImages: urls.length > 0 ? urls : undefined,
-        },
-      ])
+      await consumeRunStream(text, baseUrl, (ev) => {
+        setStreamPrimed(true)
+        if (ev.type === "collapsible_init") {
+          patchActiveMessages((m) => [
+            ...m,
+            {
+              id: newId(),
+              role: "assistant",
+              collapsible: {
+                id: ev.group_id,
+                title: ev.title,
+                lines: [],
+              },
+            },
+          ])
+          return
+        }
+        if (ev.type === "collapsible_line") {
+          patchActiveMessages((m) =>
+            m.map((msg) => {
+              if (msg.collapsible?.id !== ev.group_id) return msg
+              return {
+                ...msg,
+                collapsible: {
+                  ...msg.collapsible,
+                  lines: [...msg.collapsible.lines, ev.line],
+                },
+              }
+            }),
+          )
+          return
+        }
+        if (ev.type === "text_block") {
+          const fmt =
+            ev.format === "markdown" || ev.format === "json"
+              ? "markdown"
+              : "plain"
+          patchActiveMessages((m) => [
+            ...m,
+            {
+              id: newId(),
+              role: "assistant",
+              text: ev.content,
+              textFormat: fmt,
+            },
+          ])
+          return
+        }
+        if (ev.type === "complete") {
+          const urls = imageUrlsFromSavedFiles(ev.saved_files ?? [], baseUrl)
+          patchActiveMessages((m) => [
+            ...m,
+            {
+              id: newId(),
+              role: "assistant",
+              text:
+                urls.length > 0
+                  ? "圖片生成完成，請檢視下方結果。"
+                  : "流程已結束，但未取得產出圖片（請檢查後端日誌或設定）。",
+              generatedImages: urls.length > 0 ? urls : undefined,
+            },
+          ])
+          return
+        }
+        if (ev.type === "error") {
+          patchActiveMessages((m) => [
+            ...m,
+            {
+              id: newId(),
+              role: "assistant",
+              text: `執行失敗：${ev.detail}`,
+              error: true,
+            },
+          ])
+        }
+      })
     } catch (e) {
       const msg = e instanceof Error ? e.message : String(e)
       patchActiveMessages((m) => [
@@ -266,18 +369,19 @@ export default function App() {
         },
       ])
     } finally {
-      setLoading(false)
+      setStreaming(false)
+      setStreamPrimed(false)
     }
   }, [
     baseUrl,
     file,
+    inputPreviewDataUrl,
     serverReady,
     inputText,
     patchActiveMessages,
-    revokePreview,
   ])
 
-  const busy = loading || uploading
+  const busy = streaming || uploading
 
   return (
     <div className="app-root">
@@ -316,7 +420,11 @@ export default function App() {
             </div>
           </header>
           <main className="app-main">
-            <ChatWindow messages={messages} loading={loading} />
+            <ChatWindow
+              messages={messages}
+              streaming={streaming}
+              streamPrimed={streamPrimed}
+            />
             <InputBar
               value={inputText}
               onChange={setInputText}
@@ -324,7 +432,9 @@ export default function App() {
               disabled={busy}
               file={file}
               uploadedFileName={uploadedFileName}
-              previewUrl={previewUrl}
+              previewUrl={fileObjectUrl}
+              inputPreviewDataUrl={inputPreviewDataUrl}
+              fallbackSamplePreviewUrl={fallbackSamplePreviewUrl}
               onFileChange={handleFileChange}
               uploading={uploading}
             />
