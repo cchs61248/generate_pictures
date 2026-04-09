@@ -15,6 +15,15 @@ export function loadPersistedState(): PersistedState | null {
     if (!Array.isArray(data.sessions) || typeof data.activeId !== "string") {
       return null
     }
+    // 向後相容：舊版沒有狀態欄位
+    data.sessions = data.sessions.map((s) => ({
+      ...s,
+      // 重新整理後不延續「執行中」狀態
+      isRunning: false,
+      streamPrimed: false,
+      taskCompleted: Boolean((s as Partial<ChatSession>).taskCompleted),
+      clearOnNextSend: Boolean((s as Partial<ChatSession>).clearOnNextSend),
+    }))
     return data
   } catch {
     return null

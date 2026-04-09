@@ -65,6 +65,7 @@ async def run_pipeline(
         image=image,
         image_path=config.sample_image_path,
         picture_dir=config.picture_dir,
+        session_id=config.session_id,
         genai_client=clients.genai_client,
         gemini_client=clients.gemini_client,
         use_webapi=config.use_webapi,

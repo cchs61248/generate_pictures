@@ -236,6 +236,22 @@
   overflow: hidden;
 }
 
+.sidebar-chat-title-row {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  min-width: 0;
+}
+
+.sidebar-chat-running-dot {
+  width: 8px;
+  height: 8px;
+  flex-shrink: 0;
+  border-radius: 999px;
+  background: #8ab4f8;
+  box-shadow: 0 0 0 3px rgba(138, 180, 248, 0.18);
+}
+
 .sidebar-chat-actions {
   position: relative;
   flex-shrink: 0;
@@ -508,8 +524,113 @@
   margin: 0;
   font-size: 0.9rem;
   line-height: 1.55;
-  white-space: pre-wrap;
   word-break: break-word;
+}
+
+.msg-text--markdown > *:first-child {
+  margin-top: 0;
+}
+
+.msg-text--markdown > *:last-child {
+  margin-bottom: 0;
+}
+
+.msg-text--markdown p {
+  margin: 0.45rem 0;
+}
+
+.msg-text--markdown h1,
+.msg-text--markdown h2,
+.msg-text--markdown h3,
+.msg-text--markdown h4 {
+  margin: 0.8rem 0 0.45rem;
+  line-height: 1.35;
+  font-weight: 700;
+}
+
+.msg-text--markdown h1 {
+  font-size: 1.1rem;
+}
+
+.msg-text--markdown h2 {
+  font-size: 1rem;
+}
+
+.msg-text--markdown h3,
+.msg-text--markdown h4 {
+  font-size: 0.95rem;
+}
+
+.msg-text--markdown ul,
+.msg-text--markdown ol {
+  margin: 0.5rem 0;
+  padding-left: 1.25rem;
+}
+
+.msg-text--markdown li {
+  margin: 0.2rem 0;
+}
+
+.msg-text--markdown a {
+  color: #a8c7fa;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+
+.msg-text--markdown code {
+  font-family: ui-monospace, "Cascadia Mono", monospace;
+  font-size: 0.82em;
+  padding: 0.12rem 0.34rem;
+  border-radius: 0.32rem;
+  background: rgba(255, 255, 255, 0.08);
+}
+
+.msg-text--markdown pre {
+  margin: 0.58rem 0;
+  padding: 0.62rem 0.72rem;
+  border-radius: 0.62rem;
+  background: rgba(0, 0, 0, 0.32);
+  border: 1px solid rgba(255, 255, 255, 0.09);
+  overflow: auto;
+}
+
+.msg-text--markdown pre code {
+  display: block;
+  padding: 0;
+  background: transparent;
+}
+
+.msg-text--markdown blockquote {
+  margin: 0.6rem 0;
+  padding: 0.15rem 0 0.15rem 0.7rem;
+  border-left: 3px solid rgba(168, 199, 250, 0.55);
+  color: rgba(227, 227, 227, 0.85);
+}
+
+.msg-text--markdown table {
+  width: 100%;
+  border-collapse: collapse;
+  margin: 0.58rem 0;
+  font-size: 0.86rem;
+}
+
+.msg-text--markdown th,
+.msg-text--markdown td {
+  border: 1px solid rgba(255, 255, 255, 0.15);
+  padding: 0.34rem 0.42rem;
+  text-align: left;
+  vertical-align: top;
+}
+
+.msg-text--markdown th {
+  background: rgba(168, 199, 250, 0.12);
+  font-weight: 600;
+}
+
+.msg-text--markdown hr {
+  border: 0;
+  border-top: 1px solid rgba(255, 255, 255, 0.14);
+  margin: 0.7rem 0;
 }
 
 .msg-collapsible {
@@ -782,6 +903,30 @@
 }
 
 .input-send:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+.input-stop {
+  flex-shrink: 0;
+  height: 48px;
+  padding: 0 1.15rem;
+  border-radius: 999px;
+  border: 1px solid rgba(248, 113, 113, 0.45);
+  background: rgba(127, 29, 29, 0.35);
+  color: #fecaca;
+  font-weight: 600;
+  font-size: 0.9rem;
+  cursor: pointer;
+  transition: filter 0.15s ease, background 0.15s ease;
+}
+
+.input-stop:hover:not(:disabled) {
+  filter: brightness(1.08);
+  background: rgba(127, 29, 29, 0.5);
+}
+
+.input-stop:disabled {
   opacity: 0.45;
   cursor: not-allowed;
 }

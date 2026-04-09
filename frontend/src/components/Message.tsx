@@ -1,4 +1,6 @@
 import type { ChatMessage } from "../api"
+import Markdown from "react-markdown"
+import remarkGfm from "remark-gfm"
 
 type Props = {
   message: ChatMessage
@@ -69,7 +71,11 @@ export function MessageBubble({ message }: Props) {
                 : "msg-text"
             }
           >
-            {message.text}
+            {isMd ? (
+              <Markdown remarkPlugins={[remarkGfm]}>{message.text}</Markdown>
+            ) : (
+              message.text
+            )}
           </div>
         ) : null}
         {message.generatedImages && message.generatedImages.length > 0 ? (

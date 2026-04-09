@@ -1,9 +1,11 @@
 import asyncio
+import contextlib
 import io
 import json
 import os
+import re
 
-from fastapi import FastAPI, File, HTTPException, UploadFile
+from fastapi import FastAPI, File, Form, HTTPException, Request, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, StreamingResponse
 from PIL import Image
@@ -15,6 +17,41 @@ from core.progress import ProgressBus
 
 def _project_root() -> str:
     return os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+
+
+def _safe_session_id(session_id: str | None) -> str | None:
+    if not session_id:
+        return None
+    sid = session_id.strip()
+    if not sid:
+        return None
+    if not re.fullmatch(r"[A-Za-z0-9_-]{1,128}", sid):
+        raise HTTPException(status_code=400, detail="invalid session_id")
+    return sid
+
+
+def _sample_image_path_for_session(project_root: str, session_id: str | None) -> str:
+    sid = _safe_session_id(session_id)
+    if sid:
+        uploads_dir = os.path.join(project_root, "uploads")
+        os.makedirs(uploads_dir, exist_ok=True)
+        return os.path.join(uploads_dir, f"{sid}.jpg")
+    return os.path.join(project_root, "sample.jpg")
+
+
+def _upload_image_path_for_session(project_root: str, session_id: str) -> str:
+    sid = _safe_session_id(session_id)
+    if not sid:
+        raise HTTPException(status_code=400, detail="invalid session_id")
+    return os.path.join(project_root, "uploads", f"{sid}.jpg")
+
+
+def _apply_session_sample_path(config, session_id: str | None):
+    project_root = _project_root()
+    sid = _safe_session_id(session_id)
+    config.sample_image_path = _sample_image_path_for_session(project_root, sid)
+    config.session_id = sid or ""
+    return config
 
 
 def _readable_error(exc: Exception) -> str:
@@ -39,10 +76,10 @@ app.add_middleware(
 
 
 @app.post("/upload-image")
-async def upload_image(file: UploadFile = File(...)):
-    """接收單張圖片，存成專案根目錄 sample.jpg（供 pipeline 使用）。"""
+async def upload_image(file: UploadFile = File(...), session_id: str | None = Form(None)):
+    """接收單張圖片，存成 uploads/<sessionId>.jpg（無 sid 則回退 sample.jpg）。"""
     project_root = _project_root()
-    dest_path = os.path.join(project_root, "sample.jpg")
+    dest_path = _sample_image_path_for_session(project_root, session_id)
 
     try:
         raw = await file.read()
@@ -66,25 +103,38 @@ async def upload_image(file: UploadFile = File(...)):
 
 
 @app.get("/sample-reference")
-async def get_sample_reference():
-    """目前寫入專案根目錄的 sample.jpg（供輸入區預覽後備）。"""
+async def get_sample_reference(session_id: str | None = None):
+    """取得目前 session 的參考圖（無 sid 則回退 sample.jpg）。"""
     project_root = _project_root()
-    path = os.path.join(project_root, "sample.jpg")
+    path = _sample_image_path_for_session(project_root, session_id)
     if not os.path.exists(path):
         raise HTTPException(status_code=404, detail="sample.jpg not found")
     return FileResponse(path, media_type="image/jpeg")
+
+
+@app.delete("/session-upload/{session_id}")
+async def delete_session_upload(session_id: str):
+    """刪除 uploads/<sessionId>.jpg（不存在視為成功）。"""
+    project_root = _project_root()
+    path = _upload_image_path_for_session(project_root, session_id)
+    if os.path.exists(path):
+        os.remove(path)
+        return {"ok": True, "deleted": True, "path": path}
+    return {"ok": True, "deleted": False, "path": path}
 
 
 @app.post("/run")
 async def run_generation(payload: dict):
     stage3_only = bool(payload.get("stage3_only", False))
     user_input = payload.get("user_input")
+    session_id = payload.get("session_id")
 
     project_root = _project_root()
     load_env_file(os.path.join(project_root, ".env"))
     config = parse_config(
         stage3_only_flag=stage3_only,
     )
+    config = _apply_session_sample_path(config, session_id)
 
     try:
         result = await run_pipeline(config=config, user_input=user_input)
@@ -98,16 +148,18 @@ async def run_generation(payload: dict):
 
 
 @app.post("/run-stream")
-async def run_generation_stream(payload: dict):
+async def run_generation_stream(payload: dict, request: Request):
     """以 SSE（text/event-stream）串流各階段進度與 AI 輸出片段。"""
     stage3_only = bool(payload.get("stage3_only", False))
     user_input = payload.get("user_input")
+    session_id = payload.get("session_id")
 
     project_root = _project_root()
     load_env_file(os.path.join(project_root, ".env"))
     config = parse_config(
         stage3_only_flag=stage3_only,
     )
+    config = _apply_session_sample_path(config, session_id)
 
     async def event_stream():
         queue: asyncio.Queue = asyncio.Queue()
@@ -134,12 +186,21 @@ async def run_generation_stream(payload: dict):
         task = asyncio.create_task(runner())
         try:
             while True:
-                item = await queue.get()
+                if await request.is_disconnected():
+                    task.cancel()
+                    break
+                try:
+                    item = await asyncio.wait_for(queue.get(), timeout=0.25)
+                except asyncio.TimeoutError:
+                    continue
                 yield f"data: {json.dumps(item, ensure_ascii=False)}\n\n"
                 if item.get("type") in ("complete", "error"):
                     break
         finally:
-            await task
+            if not task.done():
+                task.cancel()
+            with contextlib.suppress(asyncio.CancelledError):
+                await task
 
     return StreamingResponse(
         event_stream(),

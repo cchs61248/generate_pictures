@@ -36,9 +36,16 @@ export type StreamEvent =
   | { type: "complete"; saved_files: string[]; final_output_path: string }
   | { type: "error"; detail: string }
 
-export async function uploadImage(file: File, baseUrl: string): Promise<void> {
+export async function uploadImage(
+  file: File,
+  baseUrl: string,
+  sessionId?: string,
+): Promise<void> {
   const form = new FormData()
   form.append("file", file)
+  if (sessionId) {
+    form.append("session_id", sessionId)
+  }
   const res = await fetch(`${trimSlash(baseUrl)}/upload-image`, {
     method: "POST",
     body: form,
@@ -47,6 +54,21 @@ export async function uploadImage(file: File, baseUrl: string): Promise<void> {
     const body = await safeJson(res)
     const detail = extractDetail(body)
     throw new Error(detail || `上傳失敗 (${res.status})`)
+  }
+}
+
+export async function deleteSessionUpload(
+  sessionId: string,
+  baseUrl: string,
+): Promise<void> {
+  const res = await fetch(
+    `${trimSlash(baseUrl)}/session-upload/${encodeURIComponent(sessionId)}`,
+    { method: "DELETE" },
+  )
+  if (!res.ok) {
+    const body = await safeJson(res)
+    const detail = extractDetail(body)
+    throw new Error(detail || `刪除上傳圖失敗 (${res.status})`)
   }
 }
 
@@ -59,6 +81,7 @@ export type RunResponse = {
 export async function runGeneration(
   userInput: string,
   baseUrl: string,
+  sessionId?: string,
 ): Promise<RunResponse> {
   const res = await fetch(`${trimSlash(baseUrl)}/run`, {
     method: "POST",
@@ -66,6 +89,7 @@ export async function runGeneration(
     body: JSON.stringify({
       user_input: userInput,
       stage3_only: false,
+      session_id: sessionId,
     }),
   })
   if (!res.ok) {
@@ -81,13 +105,17 @@ export async function consumeRunStream(
   userInput: string,
   baseUrl: string,
   onEvent: (event: StreamEvent) => void,
+  signal?: AbortSignal,
+  sessionId?: string,
 ): Promise<void> {
   const res = await fetch(`${trimSlash(baseUrl)}/run-stream`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
+    signal,
     body: JSON.stringify({
       user_input: userInput,
       stage3_only: false,
+      session_id: sessionId,
     }),
   })
   if (!res.ok) {

@@ -20,6 +20,27 @@ def _extract_urls(user_input: str) -> list[str]:
     return dedup_urls
 
 
+def _response_text_safe(response) -> str:
+    """避免直接讀 response.text 觸發 SDK non-text parts 警告。"""
+    candidates = getattr(response, "candidates", None)
+    if candidates:
+        text_parts: list[str] = []
+        for cand in candidates:
+            content = getattr(cand, "content", None)
+            parts = getattr(content, "parts", None) if content else None
+            if not parts:
+                continue
+            for part in parts:
+                text = getattr(part, "text", None)
+                if isinstance(text, str) and text:
+                    text_parts.append(text)
+        if text_parts:
+            return "\n".join(text_parts).strip()
+
+    text = getattr(response, "text", "")
+    return text or ""
+
+
 async def gather_product_info(
     user_input: str,
     image,
@@ -115,7 +136,7 @@ async def gather_product_info(
                 model="gemini-3-flash-thinking",
                 files=[image_path],
             )
-            gathered_info = response.text or ""
+            gathered_info = _response_text_safe(response)
         else:
             info_chat = genai_client.chats.create(
                 model=TEXT_MODEL,
@@ -132,7 +153,7 @@ async def gather_product_info(
                 info_chat.send_message,
                 [info_prompt, image],
             )
-            gathered_info = response.text or ""
+            gathered_info = _response_text_safe(response)
 
         print("\n✅ [階段一完成] 收集到的商品資訊如下：")
         print("-" * 40)

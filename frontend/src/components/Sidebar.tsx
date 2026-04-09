@@ -29,15 +29,12 @@ export function Sidebar({
   /** Escape 後若觸發 blur，不寫入檔名 */
   const skipRenameBlurRef = useRef(false)
 
-  const sorted = useMemo(() => {
-    return [...sessions].sort((a, b) => b.updatedAt - a.updatedAt)
-  }, [sessions])
-
+  /** 依 sessions 陣列順序顯示（新建在前），不因訊息／任務更新而重排 */
   const filtered = useMemo(() => {
     const q = query.trim().toLowerCase()
-    if (!q) return sorted
-    return sorted.filter((s) => s.title.toLowerCase().includes(q))
-  }, [sorted, query])
+    if (!q) return sessions
+    return sessions.filter((s) => s.title.toLowerCase().includes(q))
+  }, [sessions, query])
 
   useEffect(() => {
     if (renamingId && renameInputRef.current) {
@@ -137,7 +134,16 @@ export function Sidebar({
                 className={`sidebar-chat-btn ${active ? "sidebar-chat-btn--active" : ""}`}
                 onClick={() => handleSelect(s.id)}
               >
-                <span className="sidebar-chat-title">{s.title}</span>
+                <span className="sidebar-chat-title-row">
+                  {s.isRunning ? (
+                    <span
+                      className="sidebar-chat-running-dot"
+                      aria-label="執行中"
+                      title="執行中"
+                    />
+                  ) : null}
+                  <span className="sidebar-chat-title">{s.title}</span>
+                </span>
               </button>
               <div className="sidebar-chat-actions">
                 <button

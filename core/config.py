@@ -31,6 +31,7 @@ class AppConfig:
     sample_image_path: str
     final_output_path: str
     picture_dir: str
+    session_id: str
 
 
 def load_env_file(env_path: str = ".env") -> None:
@@ -79,4 +80,5 @@ def parse_config(stage3_only_flag: bool) -> AppConfig:
         sample_image_path=sample_image_path,
         final_output_path=final_output_path,
         picture_dir=picture_dir,
+        session_id="",
     )

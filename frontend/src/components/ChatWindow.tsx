@@ -1,24 +1,108 @@
-import { useEffect, useRef } from "react"
+import {
+  type MutableRefObject,
+  useEffect,
+  useLayoutEffect,
+  useRef,
+} from "react"
 import type { ChatMessage } from "../api"
 import { MessageBubble } from "./Message"
 
 type Props = {
+  sessionId: string
+  /** 若未曾捲動過可為 undefined，切換回來時改為捲到底 */
+  savedScrollTop: number | undefined
+  /** 捲動時延遲寫入，避免每幀 setState／localStorage */
+  scheduleScrollTopPersist: (sessionId: string, scrollTop: number) => void
+  /** 切換對話前立即寫入 */
+  persistScrollTopNow: (sessionId: string, scrollTop: number) => void
+  /** 供父層在切換／新建對話前強制寫入目前捲動位置 */
+  scrollFlushRef: MutableRefObject<() => void>
   messages: ChatMessage[]
   /** 串流進行中且尚未收到任何後端事件時，顯示簡短連線提示（不使用三點動畫佔滿） */
   streaming: boolean
   streamPrimed: boolean
 }
 
-export function ChatWindow({ messages, streaming, streamPrimed }: Props) {
+function isNearBottom(el: HTMLElement, thresholdPx: number) {
+  const rest = el.scrollHeight - el.scrollTop - el.clientHeight
+  return rest < thresholdPx
+}
+
+export function ChatWindow({
+  sessionId,
+  savedScrollTop,
+  scheduleScrollTopPersist,
+  persistScrollTopNow,
+  scrollFlushRef,
+  messages,
+  streaming,
+  streamPrimed,
+}: Props) {
   const bottomRef = useRef<HTMLDivElement>(null)
+  const messagesElRef = useRef<HTMLDivElement>(null)
+  const prevSessionIdRef = useRef<string | null>(null)
+  const scrollSaveRaf = useRef<number | null>(null)
+
+  useLayoutEffect(() => {
+    scrollFlushRef.current = () => {
+      const el = messagesElRef.current
+      if (el) persistScrollTopNow(sessionId, el.scrollTop)
+    }
+    return () => {
+      scrollFlushRef.current = () => {}
+    }
+  }, [persistScrollTopNow, scrollFlushRef, sessionId])
+
+  useLayoutEffect(() => {
+    const el = messagesElRef.current
+    if (!el) return
+    if (prevSessionIdRef.current === sessionId) return
+    prevSessionIdRef.current = sessionId
+
+    const apply = () => {
+      const inner = messagesElRef.current
+      if (!inner) return
+      if (savedScrollTop === undefined) {
+        inner.scrollTop = Math.max(
+          0,
+          inner.scrollHeight - inner.clientHeight,
+        )
+      } else {
+        const max = Math.max(0, inner.scrollHeight - inner.clientHeight)
+        inner.scrollTop = Math.min(savedScrollTop, max)
+      }
+    }
+    apply()
+    requestAnimationFrame(apply)
+  }, [sessionId, savedScrollTop])
 
   useEffect(() => {
+    if (!streaming) return
+    const el = messagesElRef.current
+    if (!el) return
+    if (!isNearBottom(el, 120)) return
     bottomRef.current?.scrollIntoView({ behavior: "smooth" })
   }, [messages, streaming, streamPrimed])
 
+  const handleScroll = () => {
+    const el = messagesElRef.current
+    if (!el) return
+    if (scrollSaveRaf.current != null) {
+      cancelAnimationFrame(scrollSaveRaf.current)
+    }
+    scrollSaveRaf.current = requestAnimationFrame(() => {
+      scrollSaveRaf.current = null
+      scheduleScrollTopPersist(sessionId, el.scrollTop)
+    })
+  }
+
   return (
     <div className="chat-window">
-      <div className="chat-messages">
+      <div
+        ref={messagesElRef}
+        className="chat-messages"
+        onScroll={handleScroll}
+      >
         {messages.length === 0 && (
           <div className="chat-empty">
             <p className="chat-empty-title">AI 電商圖文助手</p>

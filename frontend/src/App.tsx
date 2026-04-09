@@ -1,7 +1,8 @@
-import { useCallback, useEffect, useMemo, useState } from "react"
+import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import {
   type ChatMessage,
   consumeRunStream,
+  deleteSessionUpload,
   getApiBaseUrl,
   imageUrlsFromSavedFiles,
   uploadImage,
@@ -26,6 +27,10 @@ function createSession(): ChatSession {
     title: DEFAULT_SESSION_TITLE,
     messages: [],
     updatedAt: Date.now(),
+    isRunning: false,
+    streamPrimed: false,
+    taskCompleted: false,
+    clearOnNextSend: false,
   }
 }
 
@@ -67,8 +72,12 @@ export default function App() {
   const [inputPreviewActive, setInputPreviewActive] = useState(false)
   const [samplePreviewEpoch, setSamplePreviewEpoch] = useState(0)
   const [serverReady, setServerReady] = useState(false)
-  const [streaming, setStreaming] = useState(false)
-  const [streamPrimed, setStreamPrimed] = useState(false)
+  const runControllersRef = useRef<Map<string, AbortController>>(new Map())
+  /** 由 ChatWindow 註冊：切換／新建對話前先寫入目前訊息區捲動位置 */
+  const messagesScrollFlushRef = useRef<() => void>(() => {})
+  const messagesScrollPersistTimerRef = useRef<ReturnType<
+    typeof setTimeout
+  > | null>(null)
   const [sidebarOpen, setSidebarOpen] = useState(() =>
     typeof window !== "undefined" ? window.innerWidth > 900 : true,
   )
@@ -99,6 +108,10 @@ export default function App() {
     [sessions, activeId],
   )
   const messages = activeSession?.messages ?? []
+  const activeStreaming = activeSession?.isRunning ?? false
+  const activeStreamPrimed = activeSession?.streamPrimed ?? false
+  const taskCompleted = activeSession?.taskCompleted ?? false
+  const clearOnNextSend = activeSession?.clearOnNextSend ?? false
 
   const fallbackSamplePreviewUrl = useMemo(() => {
     if (!serverReady) return null
@@ -108,8 +121,9 @@ export default function App() {
     if (fileObjectUrl || inputPreviewDataUrl) return null
     if (!inputPreviewActive) return null
     const base = baseUrl.replace(/\/+$/, "")
-    return `${base}/sample-reference?v=${samplePreviewEpoch}`
+    return `${base}/sample-reference?session_id=${encodeURIComponent(activeId)}&v=${samplePreviewEpoch}`
   }, [
+    activeId,
     baseUrl,
     file,
     fileObjectUrl,
@@ -119,6 +133,75 @@ export default function App() {
     serverReady,
     uploadedFileName,
   ])
+
+  const patchActiveSession = useCallback(
+    (fn: (session: ChatSession) => ChatSession) => {
+      setSessions((prev) =>
+        prev.map((s) => (s.id === activeId ? fn(s) : s)),
+      )
+    },
+    [activeId, setSessions],
+  )
+
+  const patchSession = useCallback(
+    (sessionId: string, fn: (session: ChatSession) => ChatSession) => {
+      setSessions((prev) =>
+        prev.map((s) => (s.id === sessionId ? fn(s) : s)),
+      )
+    },
+    [setSessions],
+  )
+
+  const patchSessionMessages = useCallback(
+    (sessionId: string, fn: (prev: ChatMessage[]) => ChatMessage[]) => {
+      setSessions((prev) =>
+        prev.map((s) => {
+          if (s.id != sessionId) return s
+          const nextMessages = fn(s.messages)
+          const title = titleFromMessages(nextMessages, s.title)
+          return {
+            ...s,
+            messages: nextMessages,
+            title,
+            updatedAt: Date.now(),
+          }
+        }),
+      )
+    },
+    [setSessions],
+  )
+
+  const persistMessagesScroll = useCallback(
+    (sessionId: string, scrollTop: number) => {
+      setSessions((prev) =>
+        prev.map((s) =>
+          s.id === sessionId ? { ...s, messagesScrollTop: scrollTop } : s,
+        ),
+      )
+    },
+    [setSessions],
+  )
+
+  const scheduleMessagesScrollPersist = useCallback(
+    (sessionId: string, scrollTop: number) => {
+      if (messagesScrollPersistTimerRef.current) {
+        clearTimeout(messagesScrollPersistTimerRef.current)
+      }
+      messagesScrollPersistTimerRef.current = setTimeout(() => {
+        messagesScrollPersistTimerRef.current = null
+        persistMessagesScroll(sessionId, scrollTop)
+      }, 400)
+    },
+    [persistMessagesScroll],
+  )
+
+  const flushMessagesScroll = useCallback(() => {
+    if (messagesScrollPersistTimerRef.current) {
+      clearTimeout(messagesScrollPersistTimerRef.current)
+      messagesScrollPersistTimerRef.current = null
+    }
+    messagesScrollFlushRef.current()
+  }, [])
 
   const patchActiveMessages = useCallback(
     (fn: (prev: ChatMessage[]) => ChatMessage[]) => {
@@ -149,21 +232,29 @@ export default function App() {
   }, [])
 
   const handleNewChat = useCallback(() => {
+    flushMessagesScroll()
     const s = createSession()
     setSessions((prev) => [s, ...prev])
     setActiveIdOnly(s.id)
     resetInputAndUpload()
-  }, [resetInputAndUpload, setActiveIdOnly, setSessions])
+  }, [flushMessagesScroll, resetInputAndUpload, setActiveIdOnly, setSessions])
 
   const handleSelectChat = useCallback(
     (id: string) => {
+      flushMessagesScroll()
       setActiveIdOnly(id)
       resetInputAndUpload()
     },
-    [resetInputAndUpload, setActiveIdOnly],
+    [flushMessagesScroll, resetInputAndUpload, setActiveIdOnly],
   )
 
   const handleDeleteChat = useCallback((id: string) => {
+    flushMessagesScroll()
+    runControllersRef.current.get(id)?.abort()
+    runControllersRef.current.delete(id)
+    void deleteSessionUpload(id, baseUrl).catch(() => {
+      // 刪除對話時若後端檔案刪除失敗，不阻斷前端對話刪除流程
+    })
     setBoth((prev) => {
       const nextSessions = prev.sessions.filter((s) => s.id !== id)
       if (nextSessions.length === 0) {
@@ -174,7 +265,7 @@ export default function App() {
         prev.activeId === id ? nextSessions[0].id : prev.activeId
       return { sessions: nextSessions, activeId: nextActive }
     })
-  }, [])
+  }, [baseUrl, flushMessagesScroll])
 
   const handleRenameSession = useCallback(
     (id: string, newTitle: string) => {
@@ -190,6 +281,9 @@ export default function App() {
 
   const handleFileChange = useCallback(
     async (next: File | null) => {
+      if (taskCompleted) {
+        return
+      }
       if (!next) {
         setFile(null)
         setUploadedFileName(null)
@@ -204,7 +298,7 @@ export default function App() {
       setFile(detached)
       setUploading(true)
       try {
-        await uploadImage(detached, baseUrl)
+        await uploadImage(detached, baseUrl, activeId)
         setUploadedFileName(detached.name)
         setServerReady(true)
         setInputPreviewActive(true)
@@ -235,10 +329,13 @@ export default function App() {
         setUploading(false)
       }
     },
-    [baseUrl, patchActiveMessages],
+    [activeId, baseUrl, patchActiveMessages, taskCompleted],
   )
 
   const handleSend = useCallback(async () => {
+    if (taskCompleted) {
+      return
+    }
     const text = inputText.trim()
     if (!serverReady) {
       patchActiveMessages((m) => [
@@ -265,6 +362,15 @@ export default function App() {
       imageSnapshot = inputPreviewDataUrl
     }
 
+    if (clearOnNextSend) {
+      patchActiveMessages(() => [])
+      patchActiveSession((s) => ({
+        ...s,
+        clearOnNextSend: false,
+        updatedAt: Date.now(),
+      }))
+    }
+
     const userMsg: ChatMessage = {
       id: newId(),
       role: "user",
@@ -277,14 +383,25 @@ export default function App() {
     setUploadedFileName(null)
     setInputPreviewDataUrl(null)
     setInputPreviewActive(false)
-    setStreaming(true)
-    setStreamPrimed(false)
+    const sessionId = activeId
+    patchSession(sessionId, (s) => ({
+      ...s,
+      isRunning: true,
+      streamPrimed: false,
+      updatedAt: Date.now(),
+    }))
+    const aborter = new AbortController()
+    runControllersRef.current.set(sessionId, aborter)
 
     try {
       await consumeRunStream(text, baseUrl, (ev) => {
-        setStreamPrimed(true)
+        patchSession(sessionId, (s) => ({
+          ...s,
+          streamPrimed: true,
+          updatedAt: Date.now(),
+        }))
         if (ev.type === "collapsible_init") {
-          patchActiveMessages((m) => [
+          patchSessionMessages(sessionId, (m) => [
             ...m,
             {
               id: newId(),
@@ -299,7 +416,7 @@ export default function App() {
           return
         }
         if (ev.type === "collapsible_line") {
-          patchActiveMessages((m) =>
+          patchSessionMessages(sessionId, (m) =>
             m.map((msg) => {
               if (msg.collapsible?.id !== ev.group_id) return msg
               return {
@@ -318,7 +435,7 @@ export default function App() {
             ev.format === "markdown" || ev.format === "json"
               ? "markdown"
               : "plain"
-          patchActiveMessages((m) => [
+          patchSessionMessages(sessionId, (m) => [
             ...m,
             {
               id: newId(),
@@ -331,7 +448,7 @@ export default function App() {
         }
         if (ev.type === "complete") {
           const urls = imageUrlsFromSavedFiles(ev.saved_files ?? [], baseUrl)
-          patchActiveMessages((m) => [
+          patchSessionMessages(sessionId, (m) => [
             ...m,
             {
               id: newId(),
@@ -343,10 +460,17 @@ export default function App() {
               generatedImages: urls.length > 0 ? urls : undefined,
             },
           ])
+          patchSession(sessionId, (s) => ({
+            ...s,
+            isRunning: false,
+            streamPrimed: false,
+            taskCompleted: true,
+            updatedAt: Date.now(),
+          }))
           return
         }
         if (ev.type === "error") {
-          patchActiveMessages((m) => [
+          patchSessionMessages(sessionId, (m) => [
             ...m,
             {
               id: newId(),
@@ -356,10 +480,28 @@ export default function App() {
             },
           ])
         }
-      })
+      }, aborter.signal, sessionId)
     } catch (e) {
+      if (e instanceof DOMException && e.name === "AbortError") {
+        patchSessionMessages(sessionId, (m) => [
+          ...m,
+          {
+            id: newId(),
+            role: "assistant",
+            text: "已停止目前流程。",
+          },
+        ])
+        patchSession(sessionId, (s) => ({
+          ...s,
+          isRunning: false,
+          streamPrimed: false,
+          clearOnNextSend: true,
+          updatedAt: Date.now(),
+        }))
+        return
+      }
       const msg = e instanceof Error ? e.message : String(e)
-      patchActiveMessages((m) => [
+      patchSessionMessages(sessionId, (m) => [
         ...m,
         {
           id: newId(),
@@ -369,19 +511,35 @@ export default function App() {
         },
       ])
     } finally {
-      setStreaming(false)
-      setStreamPrimed(false)
+      if (runControllersRef.current.get(sessionId) === aborter) {
+        runControllersRef.current.delete(sessionId)
+      }
+      patchSession(sessionId, (s) => ({
+        ...s,
+        isRunning: false,
+        streamPrimed: false,
+        updatedAt: Date.now(),
+      }))
     }
   }, [
+    activeId,
     baseUrl,
     file,
     inputPreviewDataUrl,
     serverReady,
+    clearOnNextSend,
     inputText,
+    patchActiveSession,
     patchActiveMessages,
+    patchSession,
+    patchSessionMessages,
+    taskCompleted,
   ])
 
-  const busy = streaming || uploading
+  const busy = activeStreaming || uploading
+  const handleStop = useCallback(() => {
+    runControllersRef.current.get(activeId)?.abort()
+  }, [activeId])
 
   return (
     <div className="app-root">
@@ -421,15 +579,23 @@ export default function App() {
           </header>
           <main className="app-main">
             <ChatWindow
+              sessionId={activeId}
+              savedScrollTop={activeSession?.messagesScrollTop}
+              scheduleScrollTopPersist={scheduleMessagesScrollPersist}
+              persistScrollTopNow={persistMessagesScroll}
+              scrollFlushRef={messagesScrollFlushRef}
               messages={messages}
-              streaming={streaming}
-              streamPrimed={streamPrimed}
+              streaming={activeStreaming}
+              streamPrimed={activeStreamPrimed}
             />
             <InputBar
               value={inputText}
               onChange={setInputText}
               onSend={handleSend}
+              onStop={handleStop}
               disabled={busy}
+              isStreaming={activeStreaming}
+              taskCompleted={taskCompleted}
               file={file}
               uploadedFileName={uploadedFileName}
               previewUrl={fileObjectUrl}

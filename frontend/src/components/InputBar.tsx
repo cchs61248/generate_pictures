@@ -4,7 +4,10 @@ type Props = {
   value: string
   onChange: (value: string) => void
   onSend: () => void
+  onStop: () => void
   disabled: boolean
+  isStreaming: boolean
+  taskCompleted: boolean
   /** 目前選取的檔案（單張，再次選取會覆蓋） */
   file: File | null
   /** 已成功上傳的檔名（送出後預覽收回時仍顯示） */
@@ -22,7 +25,10 @@ export function InputBar({
   value,
   onChange,
   onSend,
+  onStop,
   disabled,
+  isStreaming,
+  taskCompleted,
   file,
   uploadedFileName,
   previewUrl,
@@ -33,6 +39,8 @@ export function InputBar({
 }: Props) {
   const thumbSrc =
     previewUrl ?? inputPreviewDataUrl ?? fallbackSamplePreviewUrl ?? null
+  const showCompleted = taskCompleted && !isStreaming
+  const displayText = showCompleted ? "任務完成" : value
   const inputId = useId()
   const fileRef = useRef<HTMLInputElement>(null)
 
@@ -89,7 +97,7 @@ export function InputBar({
           type="button"
           className="input-attach"
           onClick={handlePick}
-          disabled={disabled || uploading}
+          disabled={disabled || uploading || showCompleted}
           title="上傳一張圖片（再次選取會覆蓋）"
           aria-label="上傳圖片"
         >
@@ -98,19 +106,23 @@ export function InputBar({
         <textarea
           className="input-text"
           rows={2}
-          placeholder="輸入商品描述、網址或問題…（Enter 送出，Shift+Enter 換行）"
-          value={value}
+          placeholder={
+            showCompleted
+              ? "任務完成"
+              : "輸入商品描述、網址或問題…（Enter 送出，Shift+Enter 換行）"
+          }
+          value={displayText}
           onChange={(e) => onChange(e.target.value)}
           onKeyDown={handleKeyDown}
-          disabled={disabled || uploading}
+          disabled={disabled || uploading || showCompleted}
         />
         <button
           type="button"
-          className="input-send"
-          onClick={onSend}
-          disabled={disabled || uploading}
+          className={isStreaming ? "input-stop" : "input-send"}
+          onClick={isStreaming ? onStop : onSend}
+          disabled={uploading || showCompleted || (!isStreaming && disabled)}
         >
-          送出
+          {isStreaming ? "停止" : "送出"}
         </button>
       </div>
       {(file || uploadedFileName) && (

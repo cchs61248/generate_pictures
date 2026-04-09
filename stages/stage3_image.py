@@ -45,6 +45,7 @@ async def generate_all_images(
     gemini_client,
     use_webapi: bool,
     use_hybrid: bool,
+    session_id: str = "",
     progress: ProgressBus | None = None,
 ) -> list[str]:
     if progress:
@@ -138,7 +139,8 @@ async def generate_all_images(
                 continue
 
             resized = raw_image.resize((1000, 1000), Image.LANCZOS)
-            filename = f"P{sort_num:02d}_{safe_name}.png"
+            sid_suffix = f"_{session_id}" if session_id else ""
+            filename = f"P{sort_num:02d}_{safe_name}{sid_suffix}.png"
             file_path = os.path.join(picture_dir, filename)
             resized.save(file_path, "PNG")
             ok_line = f"  ✅ 已儲存（1000×1000）：{file_path}"
