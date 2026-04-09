@@ -1,8 +1,24 @@
+import json
+import os
+
 import requests
 from bs4 import BeautifulSoup
 from ddgs import DDGS
 
 from core.progress import GROUP_STAGE1_TOOLS, get_progress_bus
+
+TAVILY_SEARCH_URL = "https://api.tavily.com/search"
+
+
+def _search_tavily(query: str, api_key: str) -> str:
+    response = requests.post(
+        TAVILY_SEARCH_URL,
+        json={"api_key": api_key, "query": query, "max_results": 3},
+        timeout=30,
+    )
+    response.raise_for_status()
+    data = response.json()
+    return json.dumps(data.get("results", []), ensure_ascii=False)
 
 
 def search_web(query: str) -> str:
@@ -13,6 +29,12 @@ def search_web(query: str) -> str:
         bus.emit_sync(
             {"type": "collapsible_line", "group_id": GROUP_STAGE1_TOOLS, "line": line}
         )
+    api_key = (os.environ.get("TAVILY_API_KEY") or "").strip()
+    if api_key:
+        try:
+            return _search_tavily(query, api_key)
+        except Exception:
+            pass
     try:
         results = DDGS().text(query, max_results=3)
         return str(results)
