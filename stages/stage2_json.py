@@ -1,5 +1,6 @@
 import asyncio
 import json
+import os
 
 from google.genai import types
 
@@ -7,6 +8,37 @@ from core.config import TEXT_MODEL
 from core.progress import GROUP_STAGE2_META, ProgressBus
 from prompts.json_schema import prompt_template
 from utils.json_utils import extract_json_candidate, repair_to_json_apikey, repair_to_json_webapi, validate_output
+
+# 獨立一行、上下空行 → CommonMark 解析為 <hr>，前端樣式化成細橫線分隔
+_TOPIC_SEP = "-------------"
+
+
+def _format_final_data_markdown(final_data: list[dict]) -> str:
+    """緊湊 Markdown：標題用【】粗體（與素材區塊 UI 參考一致），主題間用橫線分隔。"""
+    blocks: list[str] = []
+    for item in final_data:
+        main = str(item.get("main", "")).strip()
+        scene = str(item.get("scene", "")).strip().replace("\n", " ")
+        copy_block = item.get("copy") or {}
+        headline = str(copy_block.get("headline", "")).strip()
+        subline = str(copy_block.get("subline", "")).strip()
+        tags_raw = copy_block.get("tags") or []
+        if isinstance(tags_raw, list):
+            tags_str = "、".join(str(t).strip() for t in tags_raw if str(t).strip())
+        else:
+            tags_str = str(tags_raw).strip()
+        specs = str(item.get("specs", "")).strip().replace("\n", " ")
+        lines = [
+            f"**【{main}】**  ",
+            f"**場景**：{scene}  ",
+            f"**標題**：{headline}  ",
+            f"**副標**：{subline}  ",
+            f"**標籤**：{tags_str}  ",
+            f"**規格**：{specs}",
+        ]
+        blocks.append("\n".join(lines))
+    sep = f"\n\n{_TOPIC_SEP}\n\n"
+    return sep.join(blocks)
 
 
 async def generate_json_plan(
@@ -24,7 +56,7 @@ async def generate_json_plan(
             {
                 "type": "collapsible_init",
                 "group_id": GROUP_STAGE2_META,
-                "title": "階段二 · 格式檢查與修復",
+                "title": "階段二 · 圖片腳本產生",
             }
         )
         await progress.emit(
@@ -125,6 +157,9 @@ async def generate_json_plan(
     print(json.dumps(final_data, ensure_ascii=False, indent=2))
     print("=" * 60)
 
+    out_dir = os.path.dirname(output_json_path)
+    if out_dir:
+        os.makedirs(out_dir, exist_ok=True)
     with open(output_json_path, "w", encoding="utf-8") as file:
         json.dump(final_data, file, ensure_ascii=False, indent=2)
     print(f"💾 [JSON 已儲存] {output_json_path}")
@@ -136,12 +171,12 @@ async def generate_json_plan(
                 "line": f"💾 [JSON 已儲存] {output_json_path}",
             }
         )
-        json_text = json.dumps(final_data, ensure_ascii=False, indent=2)
+        markdown_plan = _format_final_data_markdown(final_data)
         await progress.emit(
             {
                 "type": "text_block",
                 "format": "markdown",
-                "content": f"🤖 **[最終輸出] JSON**\n\n```json\n{json_text}\n```",
+                "content": f"🤖 **[圖片腳本]**\n\n{markdown_plan}",
             }
         )
     return final_data

@@ -525,6 +525,7 @@
   font-size: 0.9rem;
   line-height: 1.55;
   word-break: break-word;
+  white-space: normal;
 }
 
 .msg-text--markdown > *:first-child {
@@ -559,6 +560,11 @@
 .msg-text--markdown h3,
 .msg-text--markdown h4 {
   font-size: 0.95rem;
+}
+
+.msg-text--markdown h3 + p,
+.msg-text--markdown h4 + p {
+  margin-top: 0.25rem;
 }
 
 .msg-text--markdown ul,
@@ -629,8 +635,11 @@
 
 .msg-text--markdown hr {
   border: 0;
-  border-top: 1px solid rgba(255, 255, 255, 0.14);
-  margin: 0.7rem 0;
+  height: 1px;
+  margin: 0.85rem 0;
+  background: rgba(255, 255, 255, 0.15);
+  width: 100%;
+  flex-shrink: 0;
 }
 
 .msg-collapsible {

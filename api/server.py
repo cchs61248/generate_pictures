@@ -51,6 +51,9 @@ def _apply_session_sample_path(config, session_id: str | None):
     sid = _safe_session_id(session_id)
     config.sample_image_path = _sample_image_path_for_session(project_root, sid)
     config.session_id = sid or ""
+    if sid:
+        template_dir = os.path.join(project_root, "template_json")
+        config.final_output_path = os.path.join(template_dir, f"final_output_{sid}.json")
     return config
 
 
@@ -114,13 +117,28 @@ async def get_sample_reference(session_id: str | None = None):
 
 @app.delete("/session-upload/{session_id}")
 async def delete_session_upload(session_id: str):
-    """刪除 uploads/<sessionId>.jpg（不存在視為成功）。"""
+    """刪除 uploads/<sessionId>.jpg 與 template_json/final_output_<sessionId>.json（不存在視為成功）。"""
     project_root = _project_root()
-    path = _upload_image_path_for_session(project_root, session_id)
-    if os.path.exists(path):
-        os.remove(path)
-        return {"ok": True, "deleted": True, "path": path}
-    return {"ok": True, "deleted": False, "path": path}
+    sid = _safe_session_id(session_id)
+    if not sid:
+        raise HTTPException(status_code=400, detail="invalid session_id")
+    upload_path = os.path.join(project_root, "uploads", f"{sid}.jpg")
+    json_path = os.path.join(project_root, "template_json", f"final_output_{sid}.json")
+    deleted_upload = False
+    deleted_json = False
+    if os.path.exists(upload_path):
+        os.remove(upload_path)
+        deleted_upload = True
+    if os.path.exists(json_path):
+        os.remove(json_path)
+        deleted_json = True
+    return {
+        "ok": True,
+        "deleted_upload": deleted_upload,
+        "deleted_template_json": deleted_json,
+        "upload_path": upload_path,
+        "template_json_path": json_path,
+    }
 
 
 @app.post("/run")
