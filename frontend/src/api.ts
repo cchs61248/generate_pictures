@@ -33,6 +33,7 @@ export type StreamEvent =
   | { type: "collapsible_init"; group_id: string; title: string }
   | { type: "collapsible_line"; group_id: string; line: string }
   | { type: "text_block"; format: string; content: string }
+  | { type: "image_saved"; sort: number; main: string; saved_file: string }
   | { type: "complete"; saved_files: string[]; final_output_path: string }
   | { type: "error"; detail: string }
 

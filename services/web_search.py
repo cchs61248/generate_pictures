@@ -10,7 +10,7 @@ from core.progress import GROUP_STAGE1_TOOLS, get_progress_bus
 TAVILY_SEARCH_URL = "https://api.tavily.com/search"
 
 # LLM automatic_function_calling 單次對話中，search_web 實際查詢次數上限（不含觸發上限時的回傳訊息）。
-MAX_LLM_SEARCH_CALLS = 4
+MAX_LLM_SEARCH_CALLS = 3
 
 
 def make_bounded_search_web(max_calls: int | None = None):

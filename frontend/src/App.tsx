@@ -446,20 +446,22 @@ export default function App() {
           ])
           return
         }
-        if (ev.type === "complete") {
-          const urls = imageUrlsFromSavedFiles(ev.saved_files ?? [], baseUrl)
+        if (ev.type === "image_saved") {
+          const label = `P${Number(ev.sort).toString().padStart(2, "0")}`
+          const urls = imageUrlsFromSavedFiles([ev.saved_file], baseUrl)
           patchSessionMessages(sessionId, (m) => [
             ...m,
             {
               id: newId(),
               role: "assistant",
-              text:
-                urls.length > 0
-                  ? "圖片生成完成，請檢視下方結果。"
-                  : "流程已結束，但未取得產出圖片（請檢查後端日誌或設定）。",
-              generatedImages: urls.length > 0 ? urls : undefined,
+              text: `**${label}** ${ev.main}`,
+              textFormat: "markdown",
+              generatedImages: urls,
             },
           ])
+          return
+        }
+        if (ev.type === "complete") {
           patchSession(sessionId, (s) => ({
             ...s,
             isRunning: false,

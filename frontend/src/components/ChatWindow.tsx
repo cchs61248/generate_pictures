@@ -23,11 +23,6 @@ type Props = {
   streamPrimed: boolean
 }
 
-function isNearBottom(el: HTMLElement, thresholdPx: number) {
-  const rest = el.scrollHeight - el.scrollTop - el.clientHeight
-  return rest < thresholdPx
-}
-
 export function ChatWindow({
   sessionId,
   savedScrollTop,
@@ -41,6 +36,7 @@ export function ChatWindow({
   const bottomRef = useRef<HTMLDivElement>(null)
   const messagesElRef = useRef<HTMLDivElement>(null)
   const prevSessionIdRef = useRef<string | null>(null)
+  const prevAiSignatureRef = useRef<string>("")
   const scrollSaveRaf = useRef<number | null>(null)
 
   useLayoutEffect(() => {
@@ -77,12 +73,32 @@ export function ChatWindow({
   }, [sessionId, savedScrollTop])
 
   useEffect(() => {
-    if (!streaming) return
+    const aiSignature = messages
+      .filter((m) => m.role === "assistant")
+      .map((m) =>
+        JSON.stringify({
+          id: m.id,
+          text: m.text ?? "",
+          lines: m.collapsible?.lines.length ?? 0,
+          images: m.generatedImages?.length ?? 0,
+          error: Boolean(m.error),
+        }),
+      )
+      .join("|")
+
+    if (prevSessionIdRef.current !== sessionId) {
+      prevAiSignatureRef.current = aiSignature
+      return
+    }
+
+    const prev = prevAiSignatureRef.current
+    prevAiSignatureRef.current = aiSignature
+    if (aiSignature === prev) return
+
     const el = messagesElRef.current
     if (!el) return
-    if (!isNearBottom(el, 120)) return
     bottomRef.current?.scrollIntoView({ behavior: "smooth" })
-  }, [messages, streaming, streamPrimed])
+  }, [messages, sessionId, streaming, streamPrimed])
 
   const handleScroll = () => {
     const el = messagesElRef.current
@@ -114,9 +130,17 @@ export function ChatWindow({
         {messages.map((m) => (
           <MessageBubble key={m.id} message={m} />
         ))}
-        {streaming && !streamPrimed ? (
-          <div className="msg-row msg-row--assistant">
-            <p className="msg-stream-hint">已連線，等待階段輸出…</p>
+        {streaming ? (
+          <div
+            className="msg-row msg-row--assistant"
+            aria-live="polite"
+            aria-label={streamPrimed ? "AI 生成中" : "AI 回應中"}
+          >
+            <div className="msg-bubble msg-bubble--assistant msg-bubble--typing">
+              <span className="typing-dot" />
+              <span className="typing-dot" />
+              <span className="typing-dot" />
+            </div>
           </div>
         ) : null}
         <div ref={bottomRef} />

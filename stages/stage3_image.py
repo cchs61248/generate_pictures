@@ -4,7 +4,7 @@ import os
 
 from PIL import Image
 
-from core.progress import GROUP_STAGE3_META, ProgressBus
+from core.progress import ProgressBus
 from prompts.image_style import prompt_template as picture_style_template
 from services.image_gen import generate_image_with_retry, generate_image_webapi
 from services.image_process import build_safe_name, compose_image_prompt
@@ -48,39 +48,28 @@ async def generate_all_images(
     session_id: str = "",
     progress: ProgressBus | None = None,
 ) -> list[str]:
-    if progress:
-        await progress.emit(
-            {
-                "type": "collapsible_init",
-                "group_id": GROUP_STAGE3_META,
-                "title": "階段三 · 產圖日誌",
-            }
-        )
-        await progress.emit(
-            {
-                "type": "collapsible_line",
-                "group_id": GROUP_STAGE3_META,
-                "line": "[階段三] 正在為每張圖生成 AI 圖片，請稍候...",
-            }
-        )
-
     print("\n[階段三] 正在為每張圖生成 AI 圖片，請稍候...")
     os.makedirs(picture_dir, exist_ok=True)
 
     saved_files: list[str] = []
+    cont = 0
     for item in final_data:
+        cont += 1
         sort_num = item["sort"]
-        main_name = item["main"]
+        main_name = item["main"].replace('Prompt', '')
         image_prompt = compose_image_prompt(picture_style_template, item)
         safe_name = build_safe_name(main_name)
-        line_gen = f"🎨 [P{sort_num:02d}] 正在生成：{main_name} ..."
-        print(f"\n{line_gen}")
+        group_id = f"stage3_p{sort_num:02d}"
+
+        # 讓前端每張圖一個獨立泡泡（可摺疊工作紀錄）
+        title = f"🎨 [P{sort_num:02d}] 正在生成：{main_name}..."
+        print(f"\n{title}")
         if progress:
             await progress.emit(
                 {
-                    "type": "collapsible_line",
-                    "group_id": GROUP_STAGE3_META,
-                    "line": line_gen,
+                    "type": "collapsible_init",
+                    "group_id": group_id,
+                    "title": title,
                 }
             )
 
@@ -99,7 +88,7 @@ async def generate_all_images(
                         await progress.emit(
                             {
                                 "type": "collapsible_line",
-                                "group_id": GROUP_STAGE3_META,
+                                "group_id": group_id,
                                 "line": w.strip(),
                             }
                         )
@@ -132,7 +121,7 @@ async def generate_all_images(
                     await progress.emit(
                         {
                             "type": "collapsible_line",
-                            "group_id": GROUP_STAGE3_META,
+                            "group_id": group_id,
                             "line": w.strip(),
                         }
                     )
@@ -149,8 +138,17 @@ async def generate_all_images(
                 await progress.emit(
                     {
                         "type": "collapsible_line",
-                        "group_id": GROUP_STAGE3_META,
+                        "group_id": group_id,
                         "line": ok_line.strip(),
+                    }
+                )
+                # 讓前端每張圖完成就立刻新增「文字+圖片」泡泡
+                await progress.emit(
+                    {
+                        "type": "image_saved",
+                        "sort": int(sort_num),
+                        "main": str(main_name),
+                        "saved_file": file_path,
                     }
                 )
             saved_files.append(file_path)
@@ -161,24 +159,20 @@ async def generate_all_images(
                 await progress.emit(
                     {
                         "type": "collapsible_line",
-                        "group_id": GROUP_STAGE3_META,
+                        "group_id": group_id,
                         "line": err.strip(),
                     }
                 )
-        break
+        if cont >= 2:
+            break
     if saved_files:
         done_msg = "✅ [階段三完成] 所有圖片已儲存至 picture/ 資料夾。"
         print(f"\n{done_msg}")
     else:
         done_msg = "⚠️ [階段三完成] 本次未成功儲存任何圖片。"
         print(f"\n{done_msg}")
+    # 階段三收尾訊息仍用文字泡泡，避免依附在某張圖的折疊泡泡內
     if progress:
-        await progress.emit(
-            {
-                "type": "collapsible_line",
-                "group_id": GROUP_STAGE3_META,
-                "line": done_msg,
-            }
-        )
+        await progress.emit({"type": "text_block", "format": "plain", "content": done_msg})
 
     return saved_files
