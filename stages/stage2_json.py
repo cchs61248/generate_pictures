@@ -4,7 +4,7 @@ import os
 
 from google.genai import types
 
-from core.config import TEXT_MODEL
+from core.config import get_text_model
 from core.progress import GROUP_STAGE2_META, ProgressBus
 from prompts.json_schema import prompt_template
 from utils.json_utils import extract_json_candidate, repair_to_json_apikey, repair_to_json_webapi, validate_output
@@ -90,7 +90,7 @@ async def generate_json_plan(
     else:
         response = await asyncio.to_thread(
             genai_client.models.generate_content,
-            model=TEXT_MODEL,
+            model=get_text_model(),
             contents=[format_prompt, image],
             config=types.GenerateContentConfig(
                 system_instruction=prompt_template,

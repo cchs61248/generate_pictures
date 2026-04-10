@@ -4,7 +4,7 @@ import time
 
 from google.genai import types
 
-from core.config import IMAGE_MODEL
+from core.config import get_image_model
 
 
 def is_transient_google_api_error(err_str: str) -> bool:
@@ -36,7 +36,7 @@ def generate_image_with_retry(
     for attempt in range(max_retries + 1):
         try:
             return genai_client.models.generate_content(
-                model=IMAGE_MODEL,
+                model=get_image_model(),
                 contents=[image_prompt, product_image],
                 config=types.GenerateContentConfig(
                     response_modalities=["IMAGE"],

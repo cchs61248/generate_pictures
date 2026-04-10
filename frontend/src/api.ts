@@ -96,6 +96,98 @@ export async function fetchSessionState(
   return data
 }
 
+/** 與 core/config.py 的 ENV_VARS_HIDDEN_FROM_SETTINGS_UI 對齊；設定頁不顯示這些鍵。 */
+export const ENV_KEYS_HIDDEN_FROM_SETTINGS_UI = new Set([
+  "GEMINI_API_KEY",
+  "STAGE3_ONLY_MODE",
+  "GEMINI_COOKIE_1PSID",
+  "GEMINI_COOKIE_1PSIDTS",
+])
+
+export type EnvVariableRow = {
+  key: string
+  description: string
+  value: string
+}
+
+export type ModelChoiceOption = {
+  value: string
+  label: string
+}
+
+/** 與 core/config.py 的 TEXT_MODEL_OPTIONS／IMAGE_MODEL_OPTIONS 對齊；GET 未帶 modelChoices 時仍要能顯示下拉 */
+export const FALLBACK_MODEL_CHOICES: Record<string, ModelChoiceOption[]> = {
+  TEXT_MODEL: [
+    { value: "gemini-3-flash-preview", label: "Gemini 3 Flash" },
+    { value: "gemini-3.1-flash-lite-preview", label: "Gemini 3.1 Flash-Lite" },
+    { value: "gemini-3.1-pro-preview", label: "Gemini 3.1 Pro" },
+    { value: "gemini-2.5-flash", label: "Gemini 2.5 Flash" },
+    { value: "gemini-2.5-pro", label: "Gemini 2.5 Pro" },
+  ],
+  IMAGE_MODEL: [
+    { value: "gemini-3.1-flash-image-preview", label: "Nano Banana 2" },
+    { value: "gemini-3-pro-image-preview", label: "Nano Banana Pro" },
+    { value: "gemini-2.5-flash-image", label: "Nano Banana" },
+  ],
+}
+
+/** 優先使用後端回傳的 modelChoices，缺漏或空陣列時用 FALLBACK_MODEL_CHOICES */
+export function resolveModelChoices(
+  key: string,
+  api: Record<string, ModelChoiceOption[]> | undefined,
+): ModelChoiceOption[] {
+  const list = api?.[key]
+  if (list && list.length > 0) {
+    return list
+  }
+  return FALLBACK_MODEL_CHOICES[key] ?? []
+}
+
+export type EnvSettingsResponse = {
+  variables: EnvVariableRow[]
+  /** TEXT_MODEL、IMAGE_MODEL 等：官方 model 代碼與介面顯示名稱 */
+  modelChoices?: Record<string, ModelChoiceOption[]>
+}
+
+export async function fetchEnvSettings(
+  baseUrl: string,
+): Promise<EnvSettingsResponse> {
+  const res = await fetch(`${trimSlash(baseUrl)}/settings/env`)
+  if (!res.ok) {
+    const body = await safeJson(res)
+    const detail = extractDetail(body)
+    throw new Error(detail || `讀取設定失敗 (${res.status})`)
+  }
+  const data = (await res.json()) as Record<string, unknown>
+  const variables = Array.isArray(data.variables)
+    ? (data.variables as EnvVariableRow[])
+    : []
+  const rawChoices = data.modelChoices ?? data.model_choices
+  const modelChoices =
+    rawChoices &&
+    typeof rawChoices === "object" &&
+    !Array.isArray(rawChoices)
+      ? (rawChoices as Record<string, ModelChoiceOption[]>)
+      : undefined
+  return { variables, modelChoices }
+}
+
+export async function saveEnvSettings(
+  baseUrl: string,
+  values: Record<string, string>,
+): Promise<void> {
+  const res = await fetch(`${trimSlash(baseUrl)}/settings/env`, {
+    method: "PUT",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ values }),
+  })
+  if (!res.ok) {
+    const body = await safeJson(res)
+    const detail = extractDetail(body)
+    throw new Error(detail || `儲存設定失敗 (${res.status})`)
+  }
+}
+
 export async function saveSessionState(
   baseUrl: string,
   payload: SessionStatePayload,

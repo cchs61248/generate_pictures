@@ -3,7 +3,7 @@ import re
 
 from google.genai import types
 
-from core.config import EXPECTED_MAINS, TEXT_MODEL
+from core.config import EXPECTED_MAINS, get_text_model
 from prompts.json_schema import prompt_template
 
 
@@ -69,7 +69,7 @@ def repair_to_json_apikey(genai_client, raw_text: str) -> list[dict]:
 {raw_text}
 """
     repaired = genai_client.models.generate_content(
-        model=TEXT_MODEL,
+        model=get_text_model(),
         contents=repair_prompt,
         config=types.GenerateContentConfig(
             system_instruction=prompt_template,

@@ -8,7 +8,7 @@ if hasattr(sys.stdout, "reconfigure"):
 if hasattr(sys.stderr, "reconfigure"):
     sys.stderr.reconfigure(encoding="utf-8")
 
-from core.config import load_env_file, parse_config
+from core.config import parse_config, sync_managed_env_from_dotenv
 from core.pipeline import run_pipeline
 
 
@@ -21,7 +21,7 @@ def parse_args() -> argparse.Namespace:
 async def async_main() -> None:
     args = parse_args()
     project_root = os.path.dirname(os.path.abspath(__file__))
-    load_env_file(os.path.join(project_root, ".env"))
+    sync_managed_env_from_dotenv(os.path.join(project_root, ".env"))
     config = parse_config(
         stage3_only_flag=args.stage3_only,
     )

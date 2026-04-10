@@ -10,6 +10,8 @@ type Props = {
   onDelete: (id: string) => void
   /** 窄螢幕時關閉抽屜 */
   onNavigate?: () => void
+  onOpenSettings: () => void
+  settingsActive?: boolean
 }
 
 export function Sidebar({
@@ -20,6 +22,8 @@ export function Sidebar({
   onRename,
   onDelete,
   onNavigate,
+  onOpenSettings,
+  settingsActive = false,
 }: Props) {
   const [query, setQuery] = useState("")
   const [menuOpenId, setMenuOpenId] = useState<string | null>(null)
@@ -68,33 +72,39 @@ export function Sidebar({
     setRenamingId(null)
   }
 
+  const handleSettings = () => {
+    onOpenSettings()
+    onNavigate?.()
+  }
+
   return (
     <aside className="sidebar" aria-label="對話列表">
-      <div className="sidebar-top">
-        <label className="sidebar-search-wrap">
-          <span className="sidebar-search-icon" aria-hidden>
-            🔍
+      <div className="sidebar-body">
+        <div className="sidebar-top">
+          <label className="sidebar-search-wrap">
+            <span className="sidebar-search-icon" aria-hidden>
+              🔍
+            </span>
+            <input
+              type="search"
+              className="sidebar-search"
+              placeholder="搜尋對話"
+              value={query}
+              onChange={(e) => setQuery(e.target.value)}
+              aria-label="搜尋對話"
+            />
+          </label>
+        </div>
+
+        <button type="button" className="sidebar-new-chat" onClick={handleNew}>
+          <span className="sidebar-new-icon" aria-hidden>
+            ✎
           </span>
-          <input
-            type="search"
-            className="sidebar-search"
-            placeholder="搜尋對話"
-            value={query}
-            onChange={(e) => setQuery(e.target.value)}
-            aria-label="搜尋對話"
-          />
-        </label>
-      </div>
+          <span>新的對話</span>
+        </button>
 
-      <button type="button" className="sidebar-new-chat" onClick={handleNew}>
-        <span className="sidebar-new-icon" aria-hidden>
-          ✎
-        </span>
-        <span>新的對話</span>
-      </button>
-
-      <p className="sidebar-section-label">對話</p>
-      <ul className="sidebar-list">
+        <p className="sidebar-section-label">對話</p>
+        <ul className="sidebar-list">
         {filtered.map((s) => {
           const active = s.id === activeId
           const isRenaming = renamingId === s.id
@@ -194,7 +204,22 @@ export function Sidebar({
             </li>
           )
         })}
-      </ul>
+        </ul>
+      </div>
+
+      <div className="sidebar-footer">
+        <button
+          type="button"
+          className={`sidebar-settings-btn ${settingsActive ? "sidebar-settings-btn--active" : ""}`}
+          onClick={handleSettings}
+          aria-current={settingsActive ? "page" : undefined}
+        >
+          <span className="sidebar-settings-icon" aria-hidden>
+            ⚙
+          </span>
+          <span>設定與說明</span>
+        </button>
+      </div>
     </aside>
   )
 }

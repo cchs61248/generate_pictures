@@ -10,7 +10,19 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, StreamingResponse
 from PIL import Image
 
-from core.config import load_env_file, parse_config
+from core.config import (
+    DEFAULT_IMAGE_MODEL,
+    DEFAULT_TEXT_MODEL,
+    ENV_VARS_HIDDEN_FROM_SETTINGS_UI,
+    IMAGE_MODEL_OPTIONS,
+    MANAGED_ENV_KEYS,
+    MANAGED_ENV_VARS,
+    TEXT_MODEL_OPTIONS,
+    parse_config,
+    parse_env_file,
+    sync_managed_env_from_dotenv,
+    write_managed_env_file,
+)
 from core.pipeline import run_pipeline
 from core.progress import ProgressBus
 
@@ -111,6 +123,13 @@ def _save_session_state(project_root: str, payload: dict) -> dict:
 
 app = FastAPI(title="Generate Pictures API", version="0.1.0")
 
+
+@app.on_event("startup")
+async def startup_load_env():
+    project_root = _project_root()
+    sync_managed_env_from_dotenv(os.path.join(project_root, ".env"))
+
+
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
@@ -125,6 +144,68 @@ async def get_session_state():
     """取得目前保存的 session 狀態（前端重啟後可還原）。"""
     project_root = _project_root()
     return _load_session_state(project_root)
+
+
+@app.get("/settings/env")
+async def get_env_settings():
+    """回傳受管理環境變數的說明與目前值（來自專案 .env）；隱藏鍵不列出，供設定頁使用。"""
+    project_root = _project_root()
+    env_path = os.path.join(project_root, ".env")
+    parsed = parse_env_file(env_path)
+    variables = []
+    for spec in MANAGED_ENV_VARS:
+        if spec.key in ENV_VARS_HIDDEN_FROM_SETTINGS_UI:
+            continue
+        val = (parsed.get(spec.key, "") or "").strip()
+        if spec.key == "TEXT_MODEL":
+            val = val or DEFAULT_TEXT_MODEL
+        elif spec.key == "IMAGE_MODEL":
+            val = val or DEFAULT_IMAGE_MODEL
+        variables.append(
+            {
+                "key": spec.key,
+                "description": spec.description,
+                "value": val,
+            }
+        )
+    model_choices = {
+        "TEXT_MODEL": [
+            {"value": o.official_id, "label": o.label_zh} for o in TEXT_MODEL_OPTIONS
+        ],
+        "IMAGE_MODEL": [
+            {"value": o.official_id, "label": o.label_zh} for o in IMAGE_MODEL_OPTIONS
+        ],
+    }
+    return {"variables": variables, "modelChoices": model_choices}
+
+
+@app.put("/settings/env")
+async def put_env_settings(payload: dict):
+    """寫入 .env 並立即套用至目前後端行程。values 可只包含要變更的鍵，其餘沿用檔案現值。"""
+    raw = payload.get("values")
+    if not isinstance(raw, dict):
+        raise HTTPException(status_code=400, detail="values must be an object")
+    for k in raw:
+        if k not in MANAGED_ENV_KEYS:
+            raise HTTPException(status_code=400, detail=f"unknown env key: {k}")
+
+    project_root = _project_root()
+    env_path = os.path.join(project_root, ".env")
+    parsed = parse_env_file(env_path)
+    merged: dict[str, str] = {
+        spec.key: parsed.get(spec.key, "") for spec in MANAGED_ENV_VARS
+    }
+    for key, val in raw.items():
+        if val is None:
+            merged[key] = ""
+        elif isinstance(val, str):
+            merged[key] = val
+        else:
+            raise HTTPException(status_code=400, detail=f"invalid value for {key}")
+
+    write_managed_env_file(env_path, merged)
+    sync_managed_env_from_dotenv(env_path)
+    return {"ok": True}
 
 
 @app.put("/session-state")
@@ -205,7 +286,7 @@ async def run_generation(payload: dict):
     session_id = payload.get("session_id")
 
     project_root = _project_root()
-    load_env_file(os.path.join(project_root, ".env"))
+    sync_managed_env_from_dotenv(os.path.join(project_root, ".env"))
     config = parse_config(
         stage3_only_flag=stage3_only,
     )
@@ -230,7 +311,7 @@ async def run_generation_stream(payload: dict, request: Request):
     session_id = payload.get("session_id")
 
     project_root = _project_root()
-    load_env_file(os.path.join(project_root, ".env"))
+    sync_managed_env_from_dotenv(os.path.join(project_root, ".env"))
     config = parse_config(
         stage3_only_flag=stage3_only,
     )

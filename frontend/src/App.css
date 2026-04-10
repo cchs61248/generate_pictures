@@ -63,6 +63,23 @@
   background: rgba(255, 255, 255, 0.08);
 }
 
+.app-header-back {
+  flex-shrink: 0;
+  margin-right: 0.15rem;
+  padding: 0.4rem 0.65rem;
+  border: none;
+  border-radius: 999px;
+  background: transparent;
+  color: #a8c7fa;
+  font-size: 0.88rem;
+  font-weight: 500;
+  cursor: pointer;
+}
+
+.app-header-back:hover {
+  background: rgba(255, 255, 255, 0.08);
+}
+
 .app-header-titles {
   flex: 1;
   min-width: 0;
@@ -95,6 +112,189 @@
   padding: 0 1rem 1rem;
 }
 
+.app-main--settings {
+  max-width: min(960px, 100%);
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  /* 避免 Windows/Chrome 出現淺色預設捲軸；與 chat 區深色主題一致 */
+  color-scheme: dark;
+}
+
+/* 設定頁：環境變數表單 */
+.settings-page {
+  flex: 1;
+  min-height: 0;
+  padding: 0.5rem 0 1.5rem;
+}
+
+.settings-page-hint {
+  margin: 2rem 0;
+  text-align: center;
+  color: rgba(227, 227, 227, 0.5);
+  font-size: 0.95rem;
+}
+
+.settings-page-intro {
+  margin-bottom: 1.25rem;
+}
+
+.settings-page-title {
+  margin: 0 0 0.5rem;
+  font-size: 1.2rem;
+  font-weight: 600;
+  letter-spacing: -0.02em;
+}
+
+.settings-page-lead {
+  margin: 0;
+  font-size: 0.88rem;
+  line-height: 1.55;
+  color: rgba(227, 227, 227, 0.65);
+}
+
+.settings-code {
+  font-family: ui-monospace, monospace;
+  font-size: 0.82em;
+  padding: 0.1rem 0.35rem;
+  border-radius: 0.25rem;
+  background: rgba(255, 255, 255, 0.08);
+  color: #e3e3e3;
+}
+
+.settings-page-error {
+  margin-bottom: 1rem;
+  padding: 0.65rem 0.85rem;
+  border-radius: 0.5rem;
+  background: rgba(239, 68, 68, 0.12);
+  border: 1px solid rgba(239, 68, 68, 0.35);
+  color: #fecaca;
+  font-size: 0.88rem;
+}
+
+.settings-page-success {
+  margin-bottom: 1rem;
+  padding: 0.65rem 0.85rem;
+  border-radius: 0.5rem;
+  background: rgba(34, 197, 94, 0.12);
+  border: 1px solid rgba(34, 197, 94, 0.35);
+  color: #bbf7d0;
+  font-size: 0.88rem;
+}
+
+.settings-env-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 1.15rem;
+}
+
+.settings-env-item {
+  display: flex;
+  flex-direction: column;
+  gap: 0.45rem;
+}
+
+.settings-env-meta {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+}
+
+.settings-env-key {
+  font-family: ui-monospace, monospace;
+  font-size: 0.82rem;
+  font-weight: 600;
+  color: #a8c7fa;
+}
+
+.settings-env-desc {
+  margin: 0;
+  font-size: 0.82rem;
+  line-height: 1.5;
+  color: rgba(227, 227, 227, 0.55);
+}
+
+.settings-env-input {
+  width: 100%;
+  box-sizing: border-box;
+  padding: 0.65rem 0.85rem;
+  border-radius: 0.65rem;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  background: #1e1e1e;
+  color: #e3e3e3;
+  font-size: 0.88rem;
+  font-family: ui-monospace, monospace;
+}
+
+.settings-env-input:focus {
+  outline: none;
+  border-color: rgba(138, 180, 248, 0.45);
+  box-shadow: 0 0 0 1px rgba(138, 180, 248, 0.2);
+}
+
+.settings-env-select {
+  cursor: pointer;
+  appearance: auto;
+  min-height: 44px;
+}
+
+.settings-env-select:focus {
+  outline: none;
+  border-color: rgba(138, 180, 248, 0.45);
+  box-shadow: 0 0 0 1px rgba(138, 180, 248, 0.2);
+}
+
+.settings-page-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.65rem;
+  margin-top: 1.5rem;
+  padding-top: 1rem;
+  border-top: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+.settings-save {
+  padding: 0.55rem 1.25rem;
+  border: none;
+  border-radius: 999px;
+  background: #8ab4f8;
+  color: #131314;
+  font-weight: 600;
+  font-size: 0.9rem;
+  cursor: pointer;
+}
+
+.settings-save:hover:not(:disabled) {
+  filter: brightness(1.05);
+}
+
+.settings-save:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+
+.settings-reload {
+  padding: 0.55rem 1rem;
+  border-radius: 999px;
+  border: 1px solid rgba(255, 255, 255, 0.15);
+  background: transparent;
+  color: #e3e3e3;
+  font-size: 0.88rem;
+  cursor: pointer;
+}
+
+.settings-reload:hover:not(:disabled) {
+  background: rgba(255, 255, 255, 0.06);
+}
+
+.settings-reload:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
 /* 左側欄（Gemini 風） */
 .sidebar {
   width: 272px;
@@ -106,8 +306,53 @@
   border-right: 1px solid rgba(255, 255, 255, 0.08);
   display: flex;
   flex-direction: column;
-  padding: 0.5rem 0.65rem 1rem;
+  padding: 0.5rem 0.65rem 0.65rem;
   overflow: hidden;
+}
+
+.sidebar-body {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.sidebar-footer {
+  flex-shrink: 0;
+  padding-top: 0.5rem;
+  margin-top: 0.25rem;
+  border-top: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+.sidebar-settings-btn {
+  display: flex;
+  align-items: center;
+  gap: 0.65rem;
+  width: 100%;
+  padding: 0.65rem 0.85rem;
+  border: none;
+  border-radius: 999px;
+  background: transparent;
+  color: #e3e3e3;
+  font-size: 0.88rem;
+  cursor: pointer;
+  text-align: left;
+}
+
+.sidebar-settings-btn:hover {
+  background: rgba(255, 255, 255, 0.06);
+}
+
+.sidebar-settings-btn--active {
+  background: rgba(66, 133, 244, 0.28);
+  color: #fff;
+}
+
+.sidebar-settings-icon {
+  font-size: 1rem;
+  line-height: 1;
+  opacity: 0.88;
 }
 
 .sidebar-top {
@@ -946,31 +1191,35 @@
   color: rgba(232, 238, 245, 0.4);
 }
 
-/* 深色主題捲動條：與頁面視覺一致、低突兀 */
+/* 深色主題捲動條：與頁面視覺一致、低突兀（聊天室、側欄、設定頁同風格） */
 .chat-messages,
 .sidebar-list,
-.msg-collapsible-body {
+.msg-collapsible-body,
+.app-main--settings {
   scrollbar-width: thin;
   scrollbar-color: rgba(227, 227, 227, 0.28) rgba(255, 255, 255, 0.04);
 }
 
 .chat-messages::-webkit-scrollbar,
 .sidebar-list::-webkit-scrollbar,
-.msg-collapsible-body::-webkit-scrollbar {
+.msg-collapsible-body::-webkit-scrollbar,
+.app-main--settings::-webkit-scrollbar {
   width: 10px;
   height: 10px;
 }
 
 .chat-messages::-webkit-scrollbar-track,
 .sidebar-list::-webkit-scrollbar-track,
-.msg-collapsible-body::-webkit-scrollbar-track {
+.msg-collapsible-body::-webkit-scrollbar-track,
+.app-main--settings::-webkit-scrollbar-track {
   background: rgba(255, 255, 255, 0.04);
   border-radius: 999px;
 }
 
 .chat-messages::-webkit-scrollbar-thumb,
 .sidebar-list::-webkit-scrollbar-thumb,
-.msg-collapsible-body::-webkit-scrollbar-thumb {
+.msg-collapsible-body::-webkit-scrollbar-thumb,
+.app-main--settings::-webkit-scrollbar-thumb {
   background: linear-gradient(
     180deg,
     rgba(168, 199, 250, 0.45),
@@ -984,7 +1233,8 @@
 
 .chat-messages::-webkit-scrollbar-thumb:hover,
 .sidebar-list::-webkit-scrollbar-thumb:hover,
-.msg-collapsible-body::-webkit-scrollbar-thumb:hover {
+.msg-collapsible-body::-webkit-scrollbar-thumb:hover,
+.app-main--settings::-webkit-scrollbar-thumb:hover {
   background: linear-gradient(
     180deg,
     rgba(168, 199, 250, 0.62),

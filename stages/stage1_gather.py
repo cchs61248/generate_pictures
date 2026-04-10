@@ -3,9 +3,9 @@ import re
 
 from google.genai import types
 
-from core.config import TEXT_MODEL
+from core.config import get_text_model
 from core.progress import GROUP_STAGE1_TOOLS, ProgressBus, progress_cv
-from services.web_search import MAX_LLM_SEARCH_CALLS, fetch_webpage, make_bounded_search_web
+from services.web_search import fetch_webpage, get_max_llm_search_calls, make_bounded_search_web
 
 
 def _extract_urls(user_input: str) -> list[str]:
@@ -140,13 +140,13 @@ async def gather_product_info(
         else:
             bounded_search = make_bounded_search_web()
             info_chat = genai_client.chats.create(
-                model=TEXT_MODEL,
+                model=get_text_model(),
                 config=types.GenerateContentConfig(
                     tools=[bounded_search, fetch_webpage],
                     automatic_function_calling=types.AutomaticFunctionCallingConfig(
                         disable=False,
-                        # 搜尋最多 MAX_LLM_SEARCH_CALLS 次（見 make_bounded_search_web）；其餘額度給 fetch_webpage
-                        maximum_remote_calls=MAX_LLM_SEARCH_CALLS + 25,
+                        # 搜尋最多 get_max_llm_search_calls() 次（見 make_bounded_search_web）；其餘額度給 fetch_webpage
+                        maximum_remote_calls=get_max_llm_search_calls() + 25,
                     ),
                 ),
             )

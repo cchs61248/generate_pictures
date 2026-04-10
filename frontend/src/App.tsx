@@ -12,6 +12,7 @@ import {
 import { loadPersistedState, savePersistedState } from "./chatStorage"
 import { ChatWindow } from "./components/ChatWindow"
 import { InputBar } from "./components/InputBar"
+import { SettingsPage } from "./components/SettingsPage"
 import { Sidebar } from "./components/Sidebar"
 import { readFileAsDataUrl } from "./readFileAsDataUrl"
 import { titleFromMessages } from "./titleUtils"
@@ -84,6 +85,7 @@ export default function App() {
   const [sidebarOpen, setSidebarOpen] = useState(() =>
     typeof window !== "undefined" ? window.innerWidth > 900 : true,
   )
+  const [mainView, setMainView] = useState<"chat" | "settings">("chat")
 
   const setSessions = useCallback(
     (updater: ChatSession[] | ((prev: ChatSession[]) => ChatSession[])) => {
@@ -265,6 +267,7 @@ export default function App() {
   }, [])
 
   const handleNewChat = useCallback(() => {
+    setMainView("chat")
     flushMessagesScroll()
     const s = createSession()
     setSessions((prev) => [s, ...prev])
@@ -274,6 +277,7 @@ export default function App() {
 
   const handleSelectChat = useCallback(
     (id: string) => {
+      setMainView("chat")
       flushMessagesScroll()
       setActiveIdOnly(id)
       resetInputAndUpload()
@@ -591,6 +595,8 @@ export default function App() {
           onSelect={handleSelectChat}
           onRename={handleRenameSession}
           onDelete={handleDeleteChat}
+          settingsActive={mainView === "settings"}
+          onOpenSettings={() => setMainView("settings")}
           onNavigate={() => {
             if (typeof window !== "undefined" && window.matchMedia("(max-width: 900px)").matches) {
               setSidebarOpen(false)
@@ -607,38 +613,59 @@ export default function App() {
             >
               ☰
             </button>
+            {mainView === "settings" ? (
+              <button
+                type="button"
+                className="app-header-back"
+                onClick={() => setMainView("chat")}
+              >
+                ← 返回聊天
+              </button>
+            ) : null}
             <div className="app-header-titles">
-              <h1 className="app-title">AI 電商圖文助手</h1>
+              <h1 className="app-title">
+                {mainView === "settings" ? "設定與說明" : "AI 電商圖文助手"}
+              </h1>
               <p className="app-sub">API：{baseUrl}</p>
             </div>
           </header>
-          <main className="app-main">
-            <ChatWindow
-              sessionId={activeId}
-              savedScrollTop={activeSession?.messagesScrollTop}
-              scheduleScrollTopPersist={scheduleMessagesScrollPersist}
-              persistScrollTopNow={persistMessagesScroll}
-              scrollFlushRef={messagesScrollFlushRef}
-              messages={messages}
-              streaming={activeStreaming}
-              streamPrimed={activeStreamPrimed}
-            />
-            <InputBar
-              value={inputText}
-              onChange={setInputText}
-              onSend={handleSend}
-              onStop={handleStop}
-              disabled={busy}
-              isStreaming={activeStreaming}
-              taskCompleted={taskCompleted}
-              file={file}
-              uploadedFileName={uploadedFileName}
-              previewUrl={fileObjectUrl}
-              inputPreviewDataUrl={inputPreviewDataUrl}
-              fallbackSamplePreviewUrl={fallbackSamplePreviewUrl}
-              onFileChange={handleFileChange}
-              uploading={uploading}
-            />
+          <main
+            className={
+              mainView === "settings" ? "app-main app-main--settings" : "app-main"
+            }
+          >
+            {mainView === "settings" ? (
+              <SettingsPage baseUrl={baseUrl} />
+            ) : (
+              <>
+                <ChatWindow
+                  sessionId={activeId}
+                  savedScrollTop={activeSession?.messagesScrollTop}
+                  scheduleScrollTopPersist={scheduleMessagesScrollPersist}
+                  persistScrollTopNow={persistMessagesScroll}
+                  scrollFlushRef={messagesScrollFlushRef}
+                  messages={messages}
+                  streaming={activeStreaming}
+                  streamPrimed={activeStreamPrimed}
+                />
+                <InputBar
+                  value={inputText}
+                  onChange={setInputText}
+                  onSend={handleSend}
+                  onStop={handleStop}
+                  disabled={busy}
+                  isStreaming={activeStreaming}
+                  taskCompleted={taskCompleted}
+                  file={file}
+                  uploadedFileName={uploadedFileName}
+                  previewUrl={fileObjectUrl}
+                  inputPreviewDataUrl={inputPreviewDataUrl}
+                  fallbackSamplePreviewUrl={fallbackSamplePreviewUrl}
+                  onFileChange={handleFileChange}
+                  uploading={uploading}
+                />
+              </>
+            )}
           </main>
         </div>
       </div>
