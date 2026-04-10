@@ -48,15 +48,17 @@ export function ChatWindow({
   const prevSessionIdRef = useRef<string | null>(null)
   const prevAiSignatureRef = useRef<string>("")
   const scrollSaveRaf = useRef<number | null>(null)
+  // 用 ref 追蹤「最後一次 scroll 事件記錄的 scrollTop」，
+  // 避免 cleanup 讀 DOM 時被下一個 session 的 layoutEffect 改掉
+  const lastScrollTopRef = useRef<number>(0)
 
   useLayoutEffect(() => {
     scrollFlushRef.current = () => {
-      const el = messagesElRef.current
-      if (el) persistScrollTopNow(sessionId, el.scrollTop)
+      persistScrollTopNow(sessionId, lastScrollTopRef.current)
     }
     return () => {
-      const el = messagesElRef.current
-      if (el) persistScrollTopNow(sessionId, el.scrollTop)
+      // cleanup 直接讀 ref，不讀 DOM，避免受其他 layoutEffect 干擾
+      persistScrollTopNow(sessionId, lastScrollTopRef.current)
       scrollFlushRef.current = () => {}
     }
   }, [persistScrollTopNow, scrollFlushRef, sessionId])
@@ -79,6 +81,8 @@ export function ChatWindow({
         const max = Math.max(0, inner.scrollHeight - inner.clientHeight)
         inner.scrollTop = Math.min(savedScrollTop, max)
       }
+      // 同步更新 ref，讓 cleanup 拿到正確的初始位置
+      lastScrollTopRef.current = inner.scrollTop
     }
     apply()
     requestAnimationFrame(apply)
@@ -115,6 +119,8 @@ export function ChatWindow({
   const handleScroll = () => {
     const el = messagesElRef.current
     if (!el) return
+    // 立即更新 ref，確保 cleanup 讀到最新值
+    lastScrollTopRef.current = el.scrollTop
     if (scrollSaveRaf.current != null) {
       cancelAnimationFrame(scrollSaveRaf.current)
     }

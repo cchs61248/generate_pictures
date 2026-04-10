@@ -118,6 +118,8 @@ export type SessionStatePayload = {
   sessions: unknown[]
   activeId: string
   version: number
+  /** 已刪除的 session ID 墓碑列表，用於跨瀏覽器同步刪除 */
+  deletedIds?: string[]
 }
 
 export async function fetchSessionState(
@@ -230,7 +232,7 @@ export async function saveEnvSettings(
 
 export async function saveSessionState(
   baseUrl: string,
-  payload: SessionStatePayload & { expectedVersion: number },
+  payload: SessionStatePayload & { expectedVersion: number; deletedIds?: string[] },
 ): Promise<SessionStatePayload> {
   const res = await fetch(`${trimSlash(baseUrl)}/session-state`, {
     method: "PUT",
@@ -254,6 +256,74 @@ export async function saveSessionState(
     throw new Error("儲存 session 回應格式錯誤")
   }
   return data
+}
+
+/** 開啟子討論串時呼叫：將來源圖片路徑寫入記憶系統 */
+export async function initImageThread(
+  sessionId: string,
+  pictureFilename: string,
+  baseUrl: string,
+): Promise<void> {
+  const res = await fetch(`${trimSlash(baseUrl)}/image-thread/init`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ session_id: sessionId, picture_filename: pictureFilename }),
+  })
+  if (!res.ok) {
+    const body = await safeJson(res)
+    const detail = extractDetail(body)
+    throw new Error(detail || `初始化圖片討論串失敗 (${res.status})`)
+  }
+}
+
+export type ImageThreadStreamEvent =
+  | { type: "progress"; content: string }
+  | { type: "complete"; text: string; saved_image: string | null }
+  | { type: "error"; detail: string }
+
+/** 呼叫 POST /chat/image-thread，逐筆解析 SSE data JSON */
+export async function consumeImageThreadStream(
+  sessionId: string,
+  userText: string,
+  sessionTitle: string,
+  baseUrl: string,
+  onEvent: (event: ImageThreadStreamEvent) => void,
+  signal?: AbortSignal,
+): Promise<void> {
+  const res = await fetch(`${trimSlash(baseUrl)}/chat/image-thread`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    signal,
+    body: JSON.stringify({ session_id: sessionId, user_text: userText, session_title: sessionTitle }),
+  })
+  if (!res.ok) {
+    const body = await safeJson(res)
+    const detail = extractDetail(body)
+    throw new Error(detail || `圖片討論串請求失敗 (${res.status})`)
+  }
+  const reader = res.body?.getReader()
+  if (!reader) {
+    throw new Error("無法讀取回應本文")
+  }
+  const decoder = new TextDecoder()
+  let buffer = ""
+  while (true) {
+    const { done, value } = await reader.read()
+    if (done) break
+    buffer += decoder.decode(value, { stream: true })
+    const parts = buffer.split("\n\n")
+    buffer = parts.pop() ?? ""
+    for (const part of parts) {
+      const trimmed = part.trim()
+      if (!trimmed.startsWith("data:")) continue
+      const jsonStr = trimmed.slice(5).trimStart()
+      try {
+        onEvent(JSON.parse(jsonStr) as ImageThreadStreamEvent)
+      } catch {
+        /* 略過無法解析的片段 */
+      }
+    }
+  }
 }
 
 export async function runGeneration(

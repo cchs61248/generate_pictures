@@ -85,7 +85,9 @@ export function MessageBubble({ message, onOpenImageThread }: Props) {
         ) : null}
         {message.generatedImages && message.generatedImages.length > 0 ? (
           <div className="msg-generated">
-            <p className="msg-generated-title">產生的圖片</p>
+            {onOpenImageThread ? (
+              <p className="msg-generated-title">產生的圖片</p>
+            ) : null}
             <div className="msg-generated-grid">
               {message.generatedImages.map((url, idx) => (
                 <div key={url} className="msg-generated-card">
@@ -97,19 +99,21 @@ export function MessageBubble({ message, onOpenImageThread }: Props) {
                   >
                     <img src={url} alt="" className="msg-generated-img" />
                   </a>
-                  <button
-                    type="button"
-                    className="msg-generated-thread-btn"
-                    onClick={() =>
-                      onOpenImageThread?.(
-                        url,
-                        (message.text ?? "").trim(),
-                        `${message.id}::${idx}`,
-                      )
-                    }
-                  >
-                    開啟討論串
-                  </button>
+                  {onOpenImageThread ? (
+                    <button
+                      type="button"
+                      className="msg-generated-thread-btn"
+                      onClick={() =>
+                        onOpenImageThread(
+                          url,
+                          (message.text ?? "").trim(),
+                          `${message.id}::${idx}`,
+                        )
+                      }
+                    >
+                      開啟討論串
+                    </button>
+                  ) : null}
                 </div>
               ))}
             </div>

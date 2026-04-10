@@ -22,6 +22,8 @@ type Props = {
   lockImageThread?: boolean
   onFallbackSampleStatusChange?: (missing: boolean) => void
   showReferenceMissingWarning?: boolean
+  /** 子討論串模式：true 時送出按鈕在無文字時禁用 */
+  requireTextToSend?: boolean
 }
 
 export function InputBar({
@@ -42,6 +44,7 @@ export function InputBar({
   lockImageThread = false,
   onFallbackSampleStatusChange,
   showReferenceMissingWarning = false,
+  requireTextToSend = false,
 }: Props) {
   const thumbSrc =
     previewUrl ?? inputPreviewDataUrl ?? fallbackSamplePreviewUrl ?? null
@@ -66,10 +69,12 @@ export function InputBar({
     if (fileRef.current) fileRef.current.value = ""
   }
 
+  const sendBlocked = requireTextToSend && !value.trim()
+
   const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
     if (e.key === "Enter" && !e.shiftKey) {
       e.preventDefault()
-      if (!disabled && !uploading) onSend()
+      if (!disabled && !uploading && !sendBlocked) onSend()
     }
   }
 
@@ -137,7 +142,9 @@ export function InputBar({
             placeholder={
               showCompleted
                 ? "任務完成"
-                : "輸入商品描述、網址或問題…（Enter 送出，Shift+Enter 換行）"
+                : lockImageThread
+                  ? "輸入修改指令…（Enter 送出，Shift+Enter 換行）"
+                  : "輸入商品描述、網址或問題…（Enter 送出，Shift+Enter 換行）"
             }
             value={displayText}
             onChange={(e) => onChange(e.target.value)}
@@ -148,7 +155,7 @@ export function InputBar({
             type="button"
             className={isStreaming ? "input-stop" : "input-send"}
             onClick={isStreaming ? onStop : onSend}
-            disabled={uploading || showCompleted || (!isStreaming && disabled)}
+            disabled={uploading || showCompleted || (!isStreaming && (disabled || sendBlocked))}
           >
             {isStreaming ? "停止" : "送出"}
           </button>

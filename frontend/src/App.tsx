@@ -1,13 +1,14 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import {
-  bindSessionImageFromPicture,
   type ChatMessage,
+  consumeImageThreadStream,
   consumeRunStream,
   deleteSessionUpload,
   deleteSessionUploadImage,
   fetchSessionState,
   getApiBaseUrl,
   imageUrlsFromSavedFiles,
+  initImageThread,
   saveSessionState,
   uploadImage,
 } from "./api"
@@ -176,9 +177,11 @@ export default function App() {
   const [inputPreviewActive, setInputPreviewActive] = useState(false)
   const [samplePreviewEpoch, setSamplePreviewEpoch] = useState(0)
   const [serverReady, setServerReady] = useState(false)
-  const [threadReferenceMissing, setThreadReferenceMissing] = useState(false)
+  const [, setThreadReferenceMissing] = useState(false)
   const [hydratedFromServer, setHydratedFromServer] = useState(false)
   const sessionVersionRef = useRef(0)
+  /** 已刪除的 session ID 墓碑（只累加），確保跨瀏覽器同步刪除 */
+  const deletedIdsRef = useRef<string[]>([])
   const runControllersRef = useRef<Map<string, AbortController>>(new Map())
   /** 由 ChatWindow 註冊：切換／新建對話前先寫入目前訊息區捲動位置 */
   const messagesScrollFlushRef = useRef<() => void>(() => {})
@@ -296,8 +299,16 @@ export default function App() {
       try {
         const remote = await fetchSessionState(baseUrl)
         if (!remote || cancelled) return
+        // 載入後端的墓碑列表
+        if (remote.deletedIds && remote.deletedIds.length) {
+          deletedIdsRef.current = Array.from(
+            new Set([...deletedIdsRef.current, ...remote.deletedIds]),
+          )
+        }
         setBoth((prev) => {
-          const remoteSessions = remote.sessions as ChatSession[]
+          const remoteSessions = (remote.sessions as ChatSession[]).filter(
+            (s) => !deletedIdsRef.current.includes(s.id),
+          )
           if (!remoteSessions.length) return prev
           const activeOk = remoteSessions.some((s) => s.id === remote.activeId)
           sessionVersionRef.current = remote.version
@@ -320,36 +331,82 @@ export default function App() {
   useEffect(() => {
     savePersistedState({ sessions, activeId })
     if (!hydratedFromServer) return
+
+    // 快照：避免 closure 過舊
+    const localSessions = sessions
+    const localActiveId = activeId
+
     void (async () => {
-      try {
-        const saved = await saveSessionState(baseUrl, {
-          sessions,
-          activeId,
-          version: sessionVersionRef.current,
-          expectedVersion: sessionVersionRef.current,
-        })
-        sessionVersionRef.current = saved.version
-      } catch (e) {
-        const msg = e instanceof Error ? e.message : String(e)
-        if (msg === "SESSION_STATE_CONFLICT") {
+      // 最多重試 3 次，避免雙瀏覽器無限 409 循環
+      for (let attempt = 0; attempt < 3; attempt++) {
+        try {
+          const saved = await saveSessionState(baseUrl, {
+            sessions: localSessions,
+            activeId: localActiveId,
+            version: sessionVersionRef.current,
+            expectedVersion: sessionVersionRef.current,
+            deletedIds: deletedIdsRef.current,
+          })
+          sessionVersionRef.current = saved.version
+          // 同步後端回傳的 deletedIds（後端已 merge，更新本地墓碑）
+          if (saved.deletedIds && saved.deletedIds.length) {
+            deletedIdsRef.current = Array.from(
+              new Set([...deletedIdsRef.current, ...saved.deletedIds]),
+            )
+          }
+          return
+        } catch (e) {
+          const msg = e instanceof Error ? e.message : String(e)
+          if (msg !== "SESSION_STATE_CONFLICT") {
+            // 後端暫時不可用，不阻斷操作
+            return
+          }
+          // 409：GET 遠端最新，merge 後重試
           const remote = await fetchSessionState(baseUrl)
           if (!remote) return
-          const remoteSessions = remote.sessions as ChatSession[]
-          if (!remoteSessions.length) return
-          const keepCurrentActive = remoteSessions.some((s) => s.id === activeId)
-          const remoteActiveOk = remoteSessions.some((s) => s.id === remote.activeId)
           sessionVersionRef.current = remote.version
-          setBoth({
-            sessions: remoteSessions,
-            activeId: keepCurrentActive
-              ? activeId
-              : remoteActiveOk
-                ? remote.activeId
-                : remoteSessions[0].id,
-          })
+
+          // 合併墓碑：遠端已刪除的 ID，本地一律跟著刪
+          if (remote.deletedIds && remote.deletedIds.length) {
+            deletedIdsRef.current = Array.from(
+              new Set([...deletedIdsRef.current, ...remote.deletedIds]),
+            )
+          }
+          const tombstones = new Set(deletedIdsRef.current)
+
+          const remoteSessions = (remote.sessions as ChatSession[]).filter(
+            (s) => !tombstones.has(s.id),
+          )
+          const remoteMap = new Map(remoteSessions.map((s) => [s.id, s]))
+          const localMap  = new Map(
+            localSessions.filter((s) => !tombstones.has(s.id)).map((s) => [s.id, s]),
+          )
+
+          // 合併：兩邊都有的 session 以 updatedAt 較新者為準
+          const mergedSessions: ChatSession[] = []
+          for (const [id, remoteSess] of remoteMap) {
+            const local = localMap.get(id)
+            mergedSessions.push(
+              local && (local.updatedAt ?? 0) >= (remoteSess.updatedAt ?? 0)
+                ? local
+                : remoteSess,
+            )
+          }
+          // 僅本地有的（本地新增，遠端還沒收到）
+          for (const [id, local] of localMap) {
+            if (!remoteMap.has(id)) mergedSessions.push(local)
+          }
+
+          // 決定 activeId
+          const mergedActiveId = mergedSessions.some((s) => s.id === localActiveId)
+            ? localActiveId
+            : mergedSessions.some((s) => s.id === remote.activeId)
+              ? remote.activeId
+              : mergedSessions[0]?.id ?? localActiveId
+
+          setBoth({ sessions: mergedSessions, activeId: mergedActiveId })
           return
         }
-        // 後端暫時不可用時保留本地狀態，不阻斷操作
       }
     })()
   }, [activeId, baseUrl, hydratedFromServer, sessions])
@@ -367,29 +424,16 @@ export default function App() {
   const clearOnNextSend = activeSession?.clearOnNextSend ?? false
   const imageThreadLocked = activeSession?.imageThreadLocked ?? false
 
-  useEffect(() => {
-    if (!activeId) return
-    if (activeSession?.imageThreadLocked) {
-      // 子 session 在跨瀏覽器刷新時，直接以當前 session 當作預覽 owner，
-      // 讓 fallback /sample-reference 立刻可用，不受本地快取影響。
-      setInputAssetSessionId(activeId)
-    }
-  }, [activeId, activeSession?.imageThreadLocked])
-
   const fallbackSamplePreviewUrl = useMemo(() => {
-    const lockedThread = Boolean(activeSession?.imageThreadLocked)
-    // 子 session 直接走後端預覽，不受 inputAssetSessionId 限制
-    if (!lockedThread && inputAssetSessionId !== activeId) return null
-    if (!lockedThread && !serverReady) return null
-    // 本地仍有 File 時由 blob URL 顯示，避免在 object URL 就緒前閃爍後端舊圖
+    if (inputAssetSessionId !== activeId) return null
+    if (!serverReady) return null
     if (file) return null
-    if (!lockedThread && !uploadedFileName) return null
+    if (!uploadedFileName) return null
     if (fileObjectUrl || inputPreviewDataUrl) return null
-    if (!lockedThread && !inputPreviewActive) return null
+    if (!inputPreviewActive) return null
     const base = baseUrl.replace(/\/+$/, "")
     return `${base}/sample-reference?session_id=${encodeURIComponent(activeId)}&v=${samplePreviewEpoch}`
   }, [
-    activeSession?.imageThreadLocked,
     activeId,
     baseUrl,
     file,
@@ -560,6 +604,10 @@ export default function App() {
     const targetIds = sessions
       .filter((s) => s.id === id || s.parentId === id)
       .map((s) => s.id)
+    // 寫入墓碑，確保其他瀏覽器在 merge 時也會移除這些 session
+    deletedIdsRef.current = Array.from(
+      new Set([...deletedIdsRef.current, ...targetIds]),
+    )
     for (const sid of targetIds) {
       runControllersRef.current.get(sid)?.abort()
       runControllersRef.current.delete(sid)
@@ -570,6 +618,7 @@ export default function App() {
     }
     let nextPending: ChatSession | null = null
     setBoth((prev) => {
+      const deletedSession = prev.sessions.find((s) => s.id === id)
       const nextSessions = prev.sessions.filter(
         (s) => s.id !== id && s.parentId !== id,
       )
@@ -578,8 +627,13 @@ export default function App() {
         nextPending = temp
         return { sessions: [], activeId: temp.id }
       }
-      const nextActive =
-        prev.activeId === id ? nextSessions[0].id : prev.activeId
+      let nextActive = prev.activeId
+      if (prev.activeId === id || (deletedSession && prev.sessions.some((s) => s.parentId === id && s.id === prev.activeId))) {
+        // 若被刪的是子 session 且它本身是 active：優先跳回父 session
+        const parentId = deletedSession?.parentId
+        const parentExists = parentId && nextSessions.some((s) => s.id === parentId)
+        nextActive = parentExists ? parentId! : nextSessions[0].id
+      }
       return { sessions: nextSessions, activeId: nextActive }
     })
     if (nextPending) {
@@ -729,6 +783,116 @@ export default function App() {
       return
     }
     const text = inputText.trim()
+
+    // 子 session（圖片討論串）：走獨立的 image-thread API
+    if (imageThreadLocked) {
+      if (!text) return // 無文字不送出，由 UI 禁用按鈕保護
+
+      const userMsg: ChatMessage = {
+        id: newId(),
+        role: "user",
+        text,
+      }
+      patchActiveMessages((m) => [...m, userMsg])
+      setInputText("")
+      composerBySessionRef.current[activeId] = {
+        ...(composerBySessionRef.current[activeId] ?? emptyComposerState()),
+        inputText: "",
+      }
+
+      const sessionId = activeId
+      patchSession(sessionId, (s) => ({
+        ...s,
+        isRunning: true,
+        streamPrimed: true,
+        updatedAt: Date.now(),
+      }))
+      const aborter = new AbortController()
+      runControllersRef.current.set(sessionId, aborter)
+
+      const sessionTitle = activeSession?.title ?? "thread"
+      try {
+        await consumeImageThreadStream(
+          sessionId,
+          text,
+          sessionTitle,
+          baseUrl,
+          (ev) => {
+            if (ev.type === "progress") {
+              // 進度提示，不加入訊息列表
+              return
+            }
+            if (ev.type === "complete") {
+              const replyText = ev.text?.trim() || ""
+              const base = baseUrl.replace(/\/+$/, "")
+              const imageUrls = ev.saved_image
+                ? [`${base}/images/${encodeURIComponent(ev.saved_image)}`]
+                : []
+              patchSessionMessages(sessionId, (m) => [
+                ...m,
+                {
+                  id: newId(),
+                  role: "assistant",
+                  text: replyText || (imageUrls.length ? "已完成圖片修改。" : "已處理完畢。"),
+                  textFormat: "plain" as const,
+                  generatedImages: imageUrls.length ? imageUrls : undefined,
+                },
+              ])
+              patchSession(sessionId, (s) => ({
+                ...s,
+                isRunning: false,
+                streamPrimed: false,
+                updatedAt: Date.now(),
+              }))
+              return
+            }
+            if (ev.type === "error") {
+              patchSessionMessages(sessionId, (m) => [
+                ...m,
+                {
+                  id: newId(),
+                  role: "assistant",
+                  text: `執行失敗：${ev.detail}`,
+                  error: true,
+                },
+              ])
+            }
+          },
+          aborter.signal,
+        )
+      } catch (e) {
+        if (e instanceof DOMException && e.name === "AbortError") {
+          patchSessionMessages(sessionId, (m) => [
+            ...m,
+            { id: newId(), role: "assistant", text: "已停止目前流程。" },
+          ])
+          return
+        }
+        const msg = e instanceof Error ? e.message : String(e)
+        patchSessionMessages(sessionId, (m) => [
+          ...m,
+          {
+            id: newId(),
+            role: "assistant",
+            text: `執行失敗：${msg}`,
+            error: true,
+          },
+        ])
+      } finally {
+        if (runControllersRef.current.get(sessionId) === aborter) {
+          runControllersRef.current.delete(sessionId)
+        }
+        patchSession(sessionId, (s) => ({
+          ...s,
+          isRunning: false,
+          streamPrimed: false,
+          updatedAt: Date.now(),
+        }))
+      }
+      return
+    }
+
+    // 一般 session（主 session）原有邏輯
     if (!serverReady) {
       patchActiveMessages((m) => [
         ...m,
@@ -781,28 +945,27 @@ export default function App() {
       ...(composerBySessionRef.current[activeId] ?? emptyComposerState()),
       inputText: "",
     }
-    if (!imageThreadLocked) {
-      setFile(null)
-      setUploadedFileName(null)
-      setInputAssetSessionId(null)
-      setInputPreviewDataUrl(null)
-      setInputPreviewActive(false)
-      setServerReady(false)
-      composerBySessionRef.current[activeId] = {
-        ...(composerBySessionRef.current[activeId] ?? emptyComposerState()),
-        file: null,
-        uploadedFileName: null,
-        inputPreviewDataUrl: null,
-        inputPreviewActive: false,
-        serverReady: false,
-        samplePreviewEpoch: 0,
-      }
-      patchActiveSession((s) => ({
-        ...s,
-        referenceImageName: undefined,
-        updatedAt: Date.now(),
-      }))
+    setFile(null)
+    setUploadedFileName(null)
+    setInputAssetSessionId(null)
+    setInputPreviewDataUrl(null)
+    setInputPreviewActive(false)
+    setServerReady(false)
+    composerBySessionRef.current[activeId] = {
+      ...(composerBySessionRef.current[activeId] ?? emptyComposerState()),
+      file: null,
+      uploadedFileName: null,
+      inputPreviewDataUrl: null,
+      inputPreviewActive: false,
+      serverReady: false,
+      samplePreviewEpoch: 0,
     }
+    patchActiveSession((s) => ({
+      ...s,
+      referenceImageName: undefined,
+      updatedAt: Date.now(),
+    }))
+
     const sessionId = activeId
     patchSession(sessionId, (s) => ({
       ...s,
@@ -945,6 +1108,7 @@ export default function App() {
     }
   }, [
     activeId,
+    activeSession?.title,
     baseUrl,
     file,
     inputPreviewDataUrl,
@@ -973,6 +1137,8 @@ export default function App() {
       persistComposerState(activeId)
       const parentId = activeSession?.parentId ?? activeSession?.id
       if (!parentId) return
+
+      // 若同一泡泡已有子 session，直接切過去
       const existingThread = sessions.find(
         (s) =>
           s.parentId === parentId &&
@@ -986,6 +1152,7 @@ export default function App() {
         setActiveIdOnly(existingThread.id)
         return
       }
+
       const threadSession: ChatSession = {
         ...createSession(activeSession?.toolId),
         parentId,
@@ -1000,46 +1167,27 @@ export default function App() {
       setSessions((prev) => insertChildSession(prev, parentId, threadSession))
       setActiveIdOnly(threadSession.id)
       setInputText("")
-      setFile(null)
-      setUploadedFileName(null)
-      setInputAssetSessionId(null)
-      setInputPreviewDataUrl(null)
-      setInputPreviewActive(false)
-      setServerReady(false)
-      setUploading(true)
+
       try {
         const filename = pictureFilenameFromImageUrl(imageUrl)
         if (!filename) {
           throw new Error("無法解析 picture 圖片檔名")
         }
-        await bindSessionImageFromPicture(threadSession.id, filename, baseUrl)
-        setUploadedFileName(filename)
-        setInputAssetSessionId(threadSession.id)
-        setServerReady(true)
-        setInputPreviewActive(true)
-        const nextEpoch = samplePreviewEpoch + 1
-        setSamplePreviewEpoch(nextEpoch)
-        setInputPreviewDataUrl(null)
-        composerBySessionRef.current[threadSession.id] = {
-          inputText: "",
-          file: null,
-          uploadedFileName: filename,
-          inputPreviewDataUrl: null,
-          inputPreviewActive: true,
-          serverReady: true,
-          samplePreviewEpoch: nextEpoch,
-        }
-        patchSession(threadSession.id, (s) => ({
-          ...s,
-          referenceImageName: filename,
-          updatedAt: Date.now(),
-        }))
+        // 寫入初始圖片路徑到後端記憶系統
+        await initImageThread(threadSession.id, filename, baseUrl)
+        // 在聊天窗口以 assistant 泡泡顯示原始圖片
+        const base = baseUrl.replace(/\/+$/, "")
         patchSessionMessages(threadSession.id, (m) => [
           ...m,
           {
             id: newId(),
             role: "assistant",
-            text: "已建立圖片討論串（固定參考圖）。請描述你想對這張圖調整的內容（例如：背景、構圖、文案、光線、色調）。",
+            generatedImages: [`${base}/images/${encodeURIComponent(filename)}`],
+          },
+          {
+            id: newId(),
+            role: "assistant",
+            text: "請描述你想對這張圖調整的內容（例如：背景、構圖、色調、光線）。",
           },
         ])
       } catch (e) {
@@ -1053,8 +1201,6 @@ export default function App() {
             error: true,
           },
         ])
-      } finally {
-        setUploading(false)
       }
     },
     [
@@ -1066,7 +1212,6 @@ export default function App() {
       flushMessagesScroll,
       patchSessionMessages,
       persistComposerState,
-      samplePreviewEpoch,
       sessions,
       setActiveIdOnly,
       setSessions,
@@ -1166,32 +1311,21 @@ export default function App() {
                   disabled={busy}
                   isStreaming={activeStreaming}
                   taskCompleted={taskCompleted}
-                  file={inputAssetSessionId === activeId ? file : null}
+                  file={imageThreadLocked ? null : (inputAssetSessionId === activeId ? file : null)}
                   uploadedFileName={
-                    inputAssetSessionId === activeId ? uploadedFileName : null
+                    imageThreadLocked ? null : (inputAssetSessionId === activeId ? uploadedFileName : null)
                   }
-                  previewUrl={inputAssetSessionId === activeId ? fileObjectUrl : null}
+                  previewUrl={imageThreadLocked ? null : (inputAssetSessionId === activeId ? fileObjectUrl : null)}
                   inputPreviewDataUrl={
-                    inputAssetSessionId === activeId ? inputPreviewDataUrl : null
+                    imageThreadLocked ? null : (inputAssetSessionId === activeId ? inputPreviewDataUrl : null)
                   }
                   fallbackSamplePreviewUrl={
-                    imageThreadLocked || inputAssetSessionId === activeId
-                      ? fallbackSamplePreviewUrl
-                      : null
-                  }
-                  onFallbackSampleStatusChange={(missing) => {
-                    if (!imageThreadLocked) {
-                      setThreadReferenceMissing(false)
-                      return
-                    }
-                    setThreadReferenceMissing(missing)
-                  }}
-                  showReferenceMissingWarning={
-                    imageThreadLocked && threadReferenceMissing
+                    imageThreadLocked ? null : (inputAssetSessionId === activeId ? fallbackSamplePreviewUrl : null)
                   }
                   onFileChange={handleFileChange}
-                  uploading={uploading}
+                  uploading={imageThreadLocked ? false : uploading}
                   lockImageThread={imageThreadLocked}
+                  requireTextToSend={imageThreadLocked}
                 />
               </>
             )}
