@@ -73,12 +73,12 @@ async def gather_product_info(
 
     if dedup_urls:
         url_mandatory_block = (
-            "【強制工具】使用者輸入含下列網址，你必須瀏覽這些網址讀取實際內容，\n"
+            "【強制工具】使用者輸入含下列網址，必須先呼叫 fetch_webpage 工具取得實際內容，禁止推測頁面內容，\n"
             "禁止在未瀏覽前推測該網址上的規格或文案。\n"
             f"網址清單：{'、'.join(dedup_urls)}"
         )
     else:
-        url_mandatory_block = "【網址規則】若使用者訊息中出現 http(s) 網址，必須瀏覽該頁取得實際內容。"
+        url_mandatory_block = "【網址規則】若使用者訊息中出現 http(s) 網址，必須先呼叫 fetch_webpage 工具取得實際內容，禁止推測頁面內容。"
 
     info_prompt = f"""
 請仔細分析我上傳的商品圖片，並結合以下用戶提供的文字或網址資訊：
