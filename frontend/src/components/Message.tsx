@@ -4,9 +4,10 @@ import remarkGfm from "remark-gfm"
 
 type Props = {
   message: ChatMessage
+  onOpenImageThread?: (imageUrl: string, bubbleTitle: string) => void
 }
 
-export function MessageBubble({ message }: Props) {
+export function MessageBubble({ message, onOpenImageThread }: Props) {
   const isUser = message.role === "user"
 
   if (isUser) {
@@ -83,15 +84,23 @@ export function MessageBubble({ message }: Props) {
             <p className="msg-generated-title">產生的圖片</p>
             <div className="msg-generated-grid">
               {message.generatedImages.map((url) => (
-                <a
-                  key={url}
-                  href={url}
-                  target="_blank"
-                  rel="noreferrer"
-                  className="msg-generated-link"
-                >
-                  <img src={url} alt="" className="msg-generated-img" />
-                </a>
+                <div key={url} className="msg-generated-card">
+                  <a
+                    href={url}
+                    target="_blank"
+                    rel="noreferrer"
+                    className="msg-generated-link"
+                  >
+                    <img src={url} alt="" className="msg-generated-img" />
+                  </a>
+                  <button
+                    type="button"
+                    className="msg-generated-thread-btn"
+                    onClick={() => onOpenImageThread?.(url, (message.text ?? "").trim())}
+                  >
+                    開啟討論串
+                  </button>
+                </div>
               ))}
             </div>
           </div>

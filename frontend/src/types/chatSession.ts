@@ -2,6 +2,8 @@ import type { ChatMessage } from "../api"
 
 export type ChatSession = {
   id: string
+  /** 子討論串所屬主 session（主 session 為 undefined） */
+  parentId?: string
   /** 列表顯示用，通常取自第一則使用者文字 */
   title: string
   messages: ChatMessage[]
@@ -18,6 +20,8 @@ export type ChatSession = {
   clearOnNextSend: boolean
   /** 此對話所屬工具 ID（undefined 表示一般對話） */
   toolId?: string
+  /** 從生成圖開啟的討論串：固定使用同一張參考圖，不允許改圖 */
+  imageThreadLocked?: boolean
 }
 
 export const DEFAULT_SESSION_TITLE = "AI 電商圖文助手"

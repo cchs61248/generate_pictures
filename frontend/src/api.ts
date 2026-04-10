@@ -88,6 +88,26 @@ export async function deleteSessionUploadImage(
   }
 }
 
+export async function bindSessionImageFromPicture(
+  sessionId: string,
+  pictureFilename: string,
+  baseUrl: string,
+): Promise<void> {
+  const res = await fetch(`${trimSlash(baseUrl)}/session-upload/from-picture`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      session_id: sessionId,
+      picture_filename: pictureFilename,
+    }),
+  })
+  if (!res.ok) {
+    const body = await safeJson(res)
+    const detail = extractDetail(body)
+    throw new Error(detail || `綁定討論圖失敗 (${res.status})`)
+  }
+}
+
 export type RunResponse = {
   ok: boolean
   final_output_path: string

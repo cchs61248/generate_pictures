@@ -33,13 +33,44 @@ export function Sidebar({
   const renameInputRef = useRef<HTMLInputElement>(null)
   const skipRenameBlurRef = useRef(false)
   const [toolsExpanded, setToolsExpanded] = useState(true)
+  const [expandedParents, setExpandedParents] = useState<Record<string, boolean>>({})
 
-  /** 依 sessions 陣列順序顯示（新建在前），不因訊息／任務更新而重排 */
-  const filtered = useMemo(() => {
+  const { roots, childMap } = useMemo(() => {
+    const rootList: ChatSession[] = []
+    const cmap: Record<string, ChatSession[]> = {}
+    for (const s of sessions) {
+      if (!s.parentId) {
+        rootList.push(s)
+        continue
+      }
+      if (!cmap[s.parentId]) cmap[s.parentId] = []
+      cmap[s.parentId].push(s)
+    }
+    return { roots: rootList, childMap: cmap }
+  }, [sessions])
+
+  const filteredRoots = useMemo(() => {
     const q = query.trim().toLowerCase()
-    if (!q) return sessions
-    return sessions.filter((s) => s.title.toLowerCase().includes(q))
-  }, [sessions, query])
+    if (!q) return roots
+    return roots.filter((root) => {
+      if (root.title.toLowerCase().includes(q)) return true
+      return (childMap[root.id] ?? []).some((c) =>
+        c.title.toLowerCase().includes(q),
+      )
+    })
+  }, [childMap, query, roots])
+
+  useEffect(() => {
+    setExpandedParents((prev) => {
+      const next = { ...prev }
+      for (const root of roots) {
+        if (childMap[root.id]?.length && next[root.id] === undefined) {
+          next[root.id] = true
+        }
+      }
+      return next
+    })
+  }, [childMap, roots])
 
   useEffect(() => {
     if (renamingId && renameInputRef.current) {
@@ -140,7 +171,9 @@ export function Sidebar({
 
         <p className="sidebar-section-label">對話</p>
         <ul className="sidebar-list">
-        {filtered.map((s) => {
+        {filteredRoots.map((s) => {
+          const children = childMap[s.id] ?? []
+          const rootExpanded = expandedParents[s.id] ?? true
           const active = s.id === activeId
           const isRenaming = renamingId === s.id
 
@@ -173,74 +206,167 @@ export function Sidebar({
           }
 
           return (
-            <li key={s.id} className="sidebar-item">
-              <button
-                type="button"
-                className={`sidebar-chat-btn ${active ? "sidebar-chat-btn--active" : ""}`}
-                onClick={() => handleSelect(s.id)}
-              >
-                <span className="sidebar-chat-title-row">
-                  {s.isRunning ? (
-                    <span
-                      className="sidebar-chat-running-dot"
-                      aria-label="執行中"
-                      title="執行中"
-                    />
-                  ) : null}
-                  {s.toolId ? (
-                    <span className="sidebar-chat-tool-badge" aria-hidden>
-                      {TOOLS.find((t) => t.id === s.toolId)?.icon ?? "✦"}
-                    </span>
-                  ) : null}
-                  <span className="sidebar-chat-title">{s.title}</span>
-                </span>
-              </button>
-              <div className="sidebar-chat-actions">
+            <li key={s.id} className="sidebar-item-group">
+              <div className="sidebar-item">
+                {children.length > 0 ? (
+                  <button
+                    type="button"
+                    className={`sidebar-tree-toggle ${rootExpanded ? "sidebar-tree-toggle--open" : ""}`}
+                    aria-label={rootExpanded ? "收合子討論串" : "展開子討論串"}
+                    onClick={() =>
+                      setExpandedParents((prev) => ({
+                        ...prev,
+                        [s.id]: !(prev[s.id] ?? true),
+                      }))
+                    }
+                  >
+                    ▾
+                  </button>
+                ) : (
+                  <span className="sidebar-tree-toggle sidebar-tree-toggle--placeholder" />
+                )}
                 <button
                   type="button"
-                  className="sidebar-kebab"
-                  aria-expanded={menuOpenId === s.id}
-                  aria-label="對話選項"
-                  onClick={(e) => {
-                    e.stopPropagation()
-                    setMenuOpenId((id) => (id === s.id ? null : s.id))
-                  }}
+                  className={`sidebar-chat-btn ${active ? "sidebar-chat-btn--active" : ""}`}
+                  onClick={() => handleSelect(s.id)}
                 >
-                  ⋮
+                  <span className="sidebar-chat-title-row">
+                    {s.isRunning ? (
+                      <span
+                        className="sidebar-chat-running-dot"
+                        aria-label="執行中"
+                        title="執行中"
+                      />
+                    ) : null}
+                    {s.toolId ? (
+                      <span className="sidebar-chat-tool-badge" aria-hidden>
+                        {TOOLS.find((t) => t.id === s.toolId)?.icon ?? "✦"}
+                      </span>
+                    ) : null}
+                    <span className="sidebar-chat-title">{s.title}</span>
+                  </span>
                 </button>
-                {menuOpenId === s.id ? (
-                  <div
-                    className="sidebar-menu"
-                    role="menu"
-                    onMouseLeave={() => setMenuOpenId(null)}
+                <div className="sidebar-chat-actions">
+                  <button
+                    type="button"
+                    className="sidebar-kebab"
+                    aria-expanded={menuOpenId === s.id}
+                    aria-label="對話選項"
+                    onClick={(e) => {
+                      e.stopPropagation()
+                      setMenuOpenId((id) => (id === s.id ? null : s.id))
+                    }}
                   >
-                    <button
-                      type="button"
-                      role="menuitem"
-                      className="sidebar-menu-item"
-                      onClick={() => {
-                        setMenuOpenId(null)
-                        skipRenameBlurRef.current = false
-                        setRenamingId(s.id)
-                        setRenameDraft(s.title)
-                      }}
+                    ⋮
+                  </button>
+                  {menuOpenId === s.id ? (
+                    <div
+                      className="sidebar-menu"
+                      role="menu"
+                      onMouseLeave={() => setMenuOpenId(null)}
                     >
-                      重新命名
-                    </button>
-                    <button
-                      type="button"
-                      role="menuitem"
-                      className="sidebar-menu-item"
-                      onClick={() => {
-                        setMenuOpenId(null)
-                        onDelete(s.id)
-                      }}
-                    >
-                      刪除對話
-                    </button>
-                  </div>
-                ) : null}
+                      <button
+                        type="button"
+                        role="menuitem"
+                        className="sidebar-menu-item"
+                        onClick={() => {
+                          setMenuOpenId(null)
+                          skipRenameBlurRef.current = false
+                          setRenamingId(s.id)
+                          setRenameDraft(s.title)
+                        }}
+                      >
+                        重新命名
+                      </button>
+                      <button
+                        type="button"
+                        role="menuitem"
+                        className="sidebar-menu-item"
+                        onClick={() => {
+                          setMenuOpenId(null)
+                          onDelete(s.id)
+                        }}
+                      >
+                        刪除對話
+                      </button>
+                    </div>
+                  ) : null}
+                </div>
               </div>
+              {children.length > 0 && rootExpanded ? (
+                <ul className="sidebar-child-list">
+                  {children.map((child) => {
+                    const childActive = child.id === activeId
+                    return (
+                      <li key={child.id} className="sidebar-item sidebar-item--child">
+                        <span className="sidebar-child-branch" aria-hidden />
+                        <button
+                          type="button"
+                          className={`sidebar-chat-btn ${childActive ? "sidebar-chat-btn--active" : ""}`}
+                          onClick={() => handleSelect(child.id)}
+                        >
+                          <span className="sidebar-chat-title-row">
+                            {child.isRunning ? (
+                              <span
+                                className="sidebar-chat-running-dot"
+                                aria-label="執行中"
+                                title="執行中"
+                              />
+                            ) : null}
+                            <span className="sidebar-chat-title">{child.title}</span>
+                          </span>
+                        </button>
+                        <div className="sidebar-chat-actions">
+                          <button
+                            type="button"
+                            className="sidebar-kebab"
+                            aria-expanded={menuOpenId === child.id}
+                            aria-label="對話選項"
+                            onClick={(e) => {
+                              e.stopPropagation()
+                              setMenuOpenId((id) => (id === child.id ? null : child.id))
+                            }}
+                          >
+                            ⋮
+                          </button>
+                          {menuOpenId === child.id ? (
+                            <div
+                              className="sidebar-menu"
+                              role="menu"
+                              onMouseLeave={() => setMenuOpenId(null)}
+                            >
+                              <button
+                                type="button"
+                                role="menuitem"
+                                className="sidebar-menu-item"
+                                onClick={() => {
+                                  setMenuOpenId(null)
+                                  skipRenameBlurRef.current = false
+                                  setRenamingId(child.id)
+                                  setRenameDraft(child.title)
+                                }}
+                              >
+                                重新命名
+                              </button>
+                              <button
+                                type="button"
+                                role="menuitem"
+                                className="sidebar-menu-item"
+                                onClick={() => {
+                                  setMenuOpenId(null)
+                                  onDelete(child.id)
+                                }}
+                              >
+                                刪除對話
+                              </button>
+                            </div>
+                          ) : null}
+                        </div>
+                      </li>
+                    )
+                  })}
+                </ul>
+              ) : null}
             </li>
           )
         })}

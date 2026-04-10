@@ -19,6 +19,7 @@ type Props = {
   fallbackSamplePreviewUrl: string | null
   onFileChange: (file: File | null) => void
   uploading: boolean
+  lockImageThread?: boolean
 }
 
 export function InputBar({
@@ -36,6 +37,7 @@ export function InputBar({
   fallbackSamplePreviewUrl,
   onFileChange,
   uploading,
+  lockImageThread = false,
 }: Props) {
   const thumbSrc =
     previewUrl ?? inputPreviewDataUrl ?? fallbackSamplePreviewUrl ?? null
@@ -72,14 +74,16 @@ export function InputBar({
         {thumbSrc ? (
           <div className="input-preview">
             <img src={thumbSrc} alt="" className="input-preview-img" />
-            <button
-              type="button"
-              className="input-preview-remove"
-              onClick={clearFile}
-              aria-label="移除圖片"
-            >
-              ×
-            </button>
+            {lockImageThread ? null : (
+              <button
+                type="button"
+                className="input-preview-remove"
+                onClick={clearFile}
+                aria-label="移除圖片"
+              >
+                ×
+              </button>
+            )}
             {uploading && <span className="input-preview-badge">上傳中…</span>}
           </div>
         ) : null}
@@ -94,16 +98,18 @@ export function InputBar({
             aria-hidden={true}
             tabIndex={-1}
           />
-          <button
-            type="button"
-            className="input-attach"
-            onClick={handlePick}
-            disabled={disabled || uploading || showCompleted}
-            title="上傳一張圖片（再次選取會覆蓋）"
-            aria-label="上傳圖片"
-          >
-            📎
-          </button>
+          {lockImageThread ? null : (
+            <button
+              type="button"
+              className="input-attach"
+              onClick={handlePick}
+              disabled={disabled || uploading || showCompleted}
+              title="上傳一張圖片（再次選取會覆蓋）"
+              aria-label="上傳圖片"
+            >
+              📎
+            </button>
+          )}
           <textarea
             className="input-text"
             rows={2}

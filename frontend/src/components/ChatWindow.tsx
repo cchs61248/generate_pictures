@@ -24,6 +24,7 @@ type Props = {
   streamPrimed: boolean
   /** 此對話所屬的工具 ID */
   toolId?: string
+  onOpenImageThread?: (imageUrl: string, bubbleTitle: string) => void
 }
 
 export function ChatWindow({
@@ -36,6 +37,7 @@ export function ChatWindow({
   streaming,
   streamPrimed,
   toolId,
+  onOpenImageThread,
 }: Props) {
   const bottomRef = useRef<HTMLDivElement>(null)
   const messagesElRef = useRef<HTMLDivElement>(null)
@@ -143,7 +145,11 @@ export function ChatWindow({
             )
           })()}
           {messages.map((m) => (
-            <MessageBubble key={m.id} message={m} />
+            <MessageBubble
+              key={m.id}
+              message={m}
+              onOpenImageThread={onOpenImageThread}
+            />
           ))}
           {streaming ? (
             <div

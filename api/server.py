@@ -298,6 +298,39 @@ async def delete_session_upload_image(session_id: str):
     }
 
 
+@app.post("/session-upload/from-picture")
+async def bind_session_upload_from_picture(payload: dict):
+    """將 picture/<filename> 複製為 uploads/<sessionId>.jpg，供子討論串作為固定參考圖。"""
+    session_id = payload.get("session_id")
+    picture_filename = payload.get("picture_filename")
+    sid = _safe_session_id(session_id)
+    if not sid:
+        raise HTTPException(status_code=400, detail="invalid session_id")
+    if not isinstance(picture_filename, str) or not picture_filename.strip():
+        raise HTTPException(status_code=400, detail="invalid picture_filename")
+
+    project_root = _project_root()
+    safe_name = os.path.basename(picture_filename.strip())
+    src_path = os.path.join(project_root, "picture", safe_name)
+    if not os.path.exists(src_path):
+        raise HTTPException(status_code=404, detail="picture image not found")
+    dest_path = _upload_image_path_for_session(project_root, sid)
+    os.makedirs(os.path.dirname(dest_path), exist_ok=True)
+
+    try:
+        image = Image.open(src_path)
+        image.load()
+        if image.mode in ("RGBA", "P"):
+            image = image.convert("RGB")
+        elif image.mode != "RGB":
+            image = image.convert("RGB")
+        image.save(dest_path, "JPEG", quality=92)
+    except Exception as exc:
+        raise HTTPException(status_code=400, detail=f"invalid picture image: {exc}") from exc
+
+    return {"ok": True, "path": dest_path}
+
+
 @app.post("/run")
 async def run_generation(payload: dict):
     stage3_only = bool(payload.get("stage3_only", False))

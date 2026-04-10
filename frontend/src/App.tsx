@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import {
+  bindSessionImageFromPicture,
   type ChatMessage,
   consumeRunStream,
   deleteSessionUpload,
@@ -41,6 +42,40 @@ function createSession(toolId?: string): ChatSession {
     clearOnNextSend: false,
     toolId,
   }
+}
+
+function normalizeBubbleTitle(raw: string): string {
+  const t = raw.replace(/\*\*/g, "").replace(/\s+/g, " ").trim()
+  return t || "圖片討論串"
+}
+
+function pictureFilenameFromImageUrl(imageUrl: string): string | null {
+  try {
+    const u = new URL(imageUrl)
+    const marker = "/images/"
+    const idx = u.pathname.lastIndexOf(marker)
+    if (idx < 0) return null
+    const part = u.pathname.slice(idx + marker.length)
+    if (!part) return null
+    const name = decodeURIComponent(part.split("/").pop() ?? "")
+    return name || null
+  } catch {
+    return null
+  }
+}
+
+function insertChildSession(
+  prev: ChatSession[],
+  parentId: string,
+  child: ChatSession,
+): ChatSession[] {
+  const parentIdx = prev.findIndex((s) => s.id === parentId)
+  if (parentIdx < 0) return [child, ...prev]
+  let insertAt = parentIdx + 1
+  while (insertAt < prev.length && prev[insertAt].parentId === parentId) {
+    insertAt += 1
+  }
+  return [...prev.slice(0, insertAt), child, ...prev.slice(insertAt)]
 }
 
 function createDefaultTemporaryToolSession(): ChatSession {
@@ -107,6 +142,10 @@ export default function App() {
   const [uploading, setUploading] = useState(false)
   /** 最近一次成功上傳的檔名（收起預覽後仍顯示「已選：…」） */
   const [uploadedFileName, setUploadedFileName] = useState<string | null>(null)
+  /** 目前輸入區預覽所屬 session；避免切換對話時誤顯示其他對話的預覽 */
+  const [inputAssetSessionId, setInputAssetSessionId] = useState<string | null>(
+    null,
+  )
   /** 上傳成功後保留在輸入區的預覽（data URL），直到送出或移除；不受 blob revoke 影響 */
   const [inputPreviewDataUrl, setInputPreviewDataUrl] = useState<string | null>(
     null,
@@ -196,9 +235,11 @@ export default function App() {
   const activeStreamPrimed = activeSession?.streamPrimed ?? false
   const taskCompleted = activeSession?.taskCompleted ?? false
   const clearOnNextSend = activeSession?.clearOnNextSend ?? false
+  const imageThreadLocked = activeSession?.imageThreadLocked ?? false
 
   const fallbackSamplePreviewUrl = useMemo(() => {
     if (!serverReady) return null
+    if (inputAssetSessionId !== activeId) return null
     // 本地仍有 File 時由 blob URL 顯示，避免在 object URL 就緒前閃爍後端舊圖
     if (file) return null
     if (!uploadedFileName) return null
@@ -216,6 +257,7 @@ export default function App() {
     samplePreviewEpoch,
     serverReady,
     uploadedFileName,
+    inputAssetSessionId,
   ])
 
   const patchActiveSession = useCallback(
@@ -306,6 +348,7 @@ export default function App() {
     setInputText("")
     setFile(null)
     setUploadedFileName(null)
+    setInputAssetSessionId(null)
     setInputPreviewDataUrl(null)
     setInputPreviewActive(false)
     setServerReady(false)
@@ -350,21 +393,28 @@ export default function App() {
       flushMessagesScroll()
       setPendingToolSession(null)
       setActiveIdOnly(id)
-      resetInputAndUpload()
+      setInputText("")
     },
-    [flushMessagesScroll, resetInputAndUpload, setActiveIdOnly],
+    [flushMessagesScroll, setActiveIdOnly],
   )
 
   const handleDeleteChat = useCallback((id: string) => {
     flushMessagesScroll()
-    runControllersRef.current.get(id)?.abort()
-    runControllersRef.current.delete(id)
-    void deleteSessionUpload(id, baseUrl).catch(() => {
-      // 刪除對話時若後端檔案刪除失敗，不阻斷前端對話刪除流程
-    })
+    const targetIds = sessions
+      .filter((s) => s.id === id || s.parentId === id)
+      .map((s) => s.id)
+    for (const sid of targetIds) {
+      runControllersRef.current.get(sid)?.abort()
+      runControllersRef.current.delete(sid)
+      void deleteSessionUpload(sid, baseUrl).catch(() => {
+        // 刪除對話時若後端檔案刪除失敗，不阻斷前端對話刪除流程
+      })
+    }
     let nextPending: ChatSession | null = null
     setBoth((prev) => {
-      const nextSessions = prev.sessions.filter((s) => s.id !== id)
+      const nextSessions = prev.sessions.filter(
+        (s) => s.id !== id && s.parentId !== id,
+      )
       if (nextSessions.length === 0) {
         const temp = createDefaultTemporaryToolSession()
         nextPending = temp
@@ -377,7 +427,7 @@ export default function App() {
     if (nextPending) {
       setPendingToolSession(nextPending)
     }
-  }, [baseUrl, flushMessagesScroll])
+  }, [baseUrl, flushMessagesScroll, sessions])
 
   const handleRenameSession = useCallback(
     (id: string, newTitle: string) => {
@@ -393,7 +443,7 @@ export default function App() {
 
   const handleFileChange = useCallback(
     async (next: File | null) => {
-      if (taskCompleted) {
+      if (taskCompleted || imageThreadLocked) {
         return
       }
       if (!next) {
@@ -411,6 +461,7 @@ export default function App() {
       setInputPreviewDataUrl(null)
       setInputPreviewActive(false)
       setFile(detached)
+      setInputAssetSessionId(activeId)
       setUploading(true)
       try {
         await uploadImage(detached, baseUrl, activeId)
@@ -428,6 +479,7 @@ export default function App() {
         const msg = e instanceof Error ? e.message : String(e)
         setFile(null)
         setUploadedFileName(null)
+        setInputAssetSessionId(null)
         setInputPreviewDataUrl(null)
         setInputPreviewActive(false)
         patchActiveMessages((m) => [
@@ -444,7 +496,7 @@ export default function App() {
         setUploading(false)
       }
     },
-    [activeId, baseUrl, patchActiveMessages, taskCompleted],
+    [activeId, baseUrl, imageThreadLocked, patchActiveMessages, taskCompleted],
   )
 
   const handleSend = useCallback(async () => {
@@ -500,10 +552,12 @@ export default function App() {
     }
     patchActiveMessages((m) => [...m, userMsg])
     setInputText("")
-    setFile(null)
-    setUploadedFileName(null)
-    setInputPreviewDataUrl(null)
-    setInputPreviewActive(false)
+    if (!imageThreadLocked) {
+      setFile(null)
+      setUploadedFileName(null)
+      setInputPreviewDataUrl(null)
+      setInputPreviewActive(false)
+    }
     const sessionId = activeId
     patchSession(sessionId, (s) => ({
       ...s,
@@ -651,6 +705,7 @@ export default function App() {
     inputPreviewDataUrl,
     serverReady,
     clearOnNextSend,
+    imageThreadLocked,
     inputText,
     pendingToolSession,
     setSessions,
@@ -665,6 +720,76 @@ export default function App() {
   const handleStop = useCallback(() => {
     runControllersRef.current.get(activeId)?.abort()
   }, [activeId])
+
+  const handleOpenImageThread = useCallback(
+    async (imageUrl: string, bubbleTitle: string) => {
+      const parentId = activeSession?.parentId ?? activeSession?.id
+      if (!parentId) return
+      const threadSession: ChatSession = {
+        ...createSession(activeSession?.toolId),
+        parentId,
+        title: normalizeBubbleTitle(bubbleTitle),
+        imageThreadLocked: true,
+      }
+      setMainView("chat")
+      flushMessagesScroll()
+      setPendingToolSession(null)
+      setSessions((prev) => insertChildSession(prev, parentId, threadSession))
+      setActiveIdOnly(threadSession.id)
+      setInputText("")
+      setFile(null)
+      setUploadedFileName(null)
+      setInputAssetSessionId(null)
+      setInputPreviewDataUrl(null)
+      setInputPreviewActive(false)
+      setServerReady(false)
+      setUploading(true)
+      try {
+        const filename = pictureFilenameFromImageUrl(imageUrl)
+        if (!filename) {
+          throw new Error("無法解析 picture 圖片檔名")
+        }
+        await bindSessionImageFromPicture(threadSession.id, filename, baseUrl)
+        setUploadedFileName(filename)
+        setInputAssetSessionId(threadSession.id)
+        setServerReady(true)
+        setInputPreviewActive(true)
+        setSamplePreviewEpoch((e) => e + 1)
+        setInputPreviewDataUrl(null)
+        patchSessionMessages(threadSession.id, (m) => [
+          ...m,
+          {
+            id: newId(),
+            role: "assistant",
+            text: "已建立圖片討論串（固定參考圖）。請描述你想對這張圖調整的內容（例如：背景、構圖、文案、光線、色調）。",
+          },
+        ])
+      } catch (e) {
+        const msg = e instanceof Error ? e.message : String(e)
+        patchSessionMessages(threadSession.id, (m) => [
+          ...m,
+          {
+            id: newId(),
+            role: "assistant",
+            text: `建立圖片討論串失敗：${msg}`,
+            error: true,
+          },
+        ])
+      } finally {
+        setUploading(false)
+      }
+    },
+    [
+      activeSession?.toolId,
+      activeSession?.id,
+      activeSession?.parentId,
+      baseUrl,
+      flushMessagesScroll,
+      patchSessionMessages,
+      setActiveIdOnly,
+      setSessions,
+    ],
+  )
 
   return (
     <div className="app-root">
@@ -740,6 +865,7 @@ export default function App() {
                   streaming={activeStreaming}
                   streamPrimed={activeStreamPrimed}
                   toolId={activeSession?.toolId}
+                  onOpenImageThread={handleOpenImageThread}
                 />
                 <InputBar
                   value={inputText}
@@ -749,13 +875,22 @@ export default function App() {
                   disabled={busy}
                   isStreaming={activeStreaming}
                   taskCompleted={taskCompleted}
-                  file={file}
-                  uploadedFileName={uploadedFileName}
-                  previewUrl={fileObjectUrl}
-                  inputPreviewDataUrl={inputPreviewDataUrl}
-                  fallbackSamplePreviewUrl={fallbackSamplePreviewUrl}
+                  file={inputAssetSessionId === activeId ? file : null}
+                  uploadedFileName={
+                    inputAssetSessionId === activeId ? uploadedFileName : null
+                  }
+                  previewUrl={inputAssetSessionId === activeId ? fileObjectUrl : null}
+                  inputPreviewDataUrl={
+                    inputAssetSessionId === activeId ? inputPreviewDataUrl : null
+                  }
+                  fallbackSamplePreviewUrl={
+                    inputAssetSessionId === activeId
+                      ? fallbackSamplePreviewUrl
+                      : null
+                  }
                   onFileChange={handleFileChange}
                   uploading={uploading}
+                  lockImageThread={imageThreadLocked}
                 />
               </>
             )}
