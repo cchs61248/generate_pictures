@@ -16,20 +16,23 @@ import { InputBar } from "./components/InputBar"
 import { SettingsPage } from "./components/SettingsPage"
 import { Sidebar } from "./components/Sidebar"
 import { readFileAsDataUrl } from "./readFileAsDataUrl"
-import { getToolById } from "./tools"
+import { getToolById, TOOLS } from "./tools"
 import { titleFromMessages } from "./titleUtils"
 import { DEFAULT_SESSION_TITLE, type ChatSession } from "./types/chatSession"
 import { useObjectUrlForFile } from "./useObjectUrlForFile"
 import "./App.css"
+
+const STORAGE_KEY = "gnerate_pictures_chat_v1"
 
 function newId(): string {
   return crypto.randomUUID()
 }
 
 function createSession(toolId?: string): ChatSession {
+  const toolTitle = toolId ? getToolById(toolId)?.chatTitle : undefined
   return {
     id: newId(),
-    title: DEFAULT_SESSION_TITLE,
+    title: toolTitle ?? DEFAULT_SESSION_TITLE,
     messages: [],
     updatedAt: Date.now(),
     isRunning: false,
@@ -40,17 +43,47 @@ function createSession(toolId?: string): ChatSession {
   }
 }
 
-function initialState(): { sessions: ChatSession[]; activeId: string } {
+function createDefaultTemporaryToolSession(): ChatSession {
+  const defaultToolId = TOOLS[0]?.id
+  return createSession(defaultToolId)
+}
+
+function initialState(): {
+  sessions: ChatSession[]
+  activeId: string
+  pendingToolSession: ChatSession | null
+} {
   const persisted = loadPersistedState()
   if (persisted?.sessions?.length) {
     const activeOk = persisted.sessions.some((s) => s.id === persisted.activeId)
     return {
       sessions: persisted.sessions,
       activeId: activeOk ? persisted.activeId : persisted.sessions[0].id,
+      pendingToolSession: null,
     }
   }
-  const s = createSession()
-  return { sessions: [s], activeId: s.id }
+  const temp = createDefaultTemporaryToolSession()
+  return { sessions: [], activeId: temp.id, pendingToolSession: temp }
+}
+
+function normalizeIncomingState(incoming: {
+  sessions: ChatSession[]
+  activeId: string
+}): {
+  sessions: ChatSession[]
+  activeId: string
+  pendingToolSession: ChatSession | null
+} {
+  if (incoming.sessions.length === 0) {
+    const temp = createDefaultTemporaryToolSession()
+    return { sessions: [], activeId: temp.id, pendingToolSession: temp }
+  }
+  const activeOk = incoming.sessions.some((s) => s.id === incoming.activeId)
+  return {
+    sessions: incoming.sessions,
+    activeId: activeOk ? incoming.activeId : incoming.sessions[0].id,
+    pendingToolSession: null,
+  }
 }
 
 async function cloneFileDetached(file: File): Promise<File> {
@@ -62,8 +95,12 @@ async function cloneFileDetached(file: File): Promise<File> {
 }
 
 export default function App() {
+  const boot = initialState()
   const baseUrl = getApiBaseUrl()
-  const [{ sessions, activeId }, setBoth] = useState(() => initialState())
+  const [{ sessions, activeId }, setBoth] = useState(() => ({
+    sessions: boot.sessions,
+    activeId: boot.activeId,
+  }))
   const [inputText, setInputText] = useState("")
   const [file, setFile] = useState<File | null>(null)
   const fileObjectUrl = useObjectUrlForFile(file)
@@ -93,7 +130,9 @@ export default function App() {
    * 點擊工具後建立的「暫存對話」，尚未加入 sessions。
    * 送出第一筆訊息時才正式 commit 進 sessions。
    */
-  const [pendingToolSession, setPendingToolSession] = useState<ChatSession | null>(null)
+  const [pendingToolSession, setPendingToolSession] = useState<ChatSession | null>(
+    () => boot.pendingToolSession,
+  )
 
   const setSessions = useCallback(
     (updater: ChatSession[] | ((prev: ChatSession[]) => ChatSession[])) => {
@@ -272,15 +311,25 @@ export default function App() {
     setServerReady(false)
   }, [])
 
-  const handleNewChat = useCallback(() => {
-    setMainView("chat")
-    flushMessagesScroll()
-    setPendingToolSession(null)
-    const s = createSession()
-    setSessions((prev) => [s, ...prev])
-    setActiveIdOnly(s.id)
-    resetInputAndUpload()
-  }, [flushMessagesScroll, resetInputAndUpload, setActiveIdOnly, setSessions])
+  useEffect(() => {
+    const handleStorage = (ev: StorageEvent) => {
+      if (ev.key !== STORAGE_KEY) return
+      const next = loadPersistedState()
+      if (!next) return
+      const normalized = normalizeIncomingState(next)
+      flushMessagesScroll()
+      setBoth({
+        sessions: normalized.sessions,
+        activeId: normalized.activeId,
+      })
+      setPendingToolSession(normalized.pendingToolSession)
+      resetInputAndUpload()
+    }
+    window.addEventListener("storage", handleStorage)
+    return () => {
+      window.removeEventListener("storage", handleStorage)
+    }
+  }, [flushMessagesScroll, resetInputAndUpload])
 
   const handleNewToolChat = useCallback(
     (toolId: string) => {
@@ -313,16 +362,21 @@ export default function App() {
     void deleteSessionUpload(id, baseUrl).catch(() => {
       // 刪除對話時若後端檔案刪除失敗，不阻斷前端對話刪除流程
     })
+    let nextPending: ChatSession | null = null
     setBoth((prev) => {
       const nextSessions = prev.sessions.filter((s) => s.id !== id)
       if (nextSessions.length === 0) {
-        const fresh = createSession()
-        return { sessions: [fresh], activeId: fresh.id }
+        const temp = createDefaultTemporaryToolSession()
+        nextPending = temp
+        return { sessions: [], activeId: temp.id }
       }
       const nextActive =
         prev.activeId === id ? nextSessions[0].id : prev.activeId
       return { sessions: nextSessions, activeId: nextActive }
     })
+    if (nextPending) {
+      setPendingToolSession(nextPending)
+    }
   }, [baseUrl, flushMessagesScroll])
 
   const handleRenameSession = useCallback(
@@ -623,7 +677,6 @@ export default function App() {
         <Sidebar
           sessions={sessions}
           activeId={activeId}
-          onNewChat={handleNewChat}
           onNewToolChat={handleNewToolChat}
           onSelect={handleSelectChat}
           onRename={handleRenameSession}

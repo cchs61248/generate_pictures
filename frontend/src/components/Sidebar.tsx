@@ -5,7 +5,6 @@ import { TOOLS } from "../tools"
 type Props = {
   sessions: ChatSession[]
   activeId: string
-  onNewChat: () => void
   onNewToolChat: (toolId: string) => void
   onSelect: (id: string) => void
   onRename: (id: string, newTitle: string) => void
@@ -19,7 +18,6 @@ type Props = {
 export function Sidebar({
   sessions,
   activeId,
-  onNewChat,
   onNewToolChat,
   onSelect,
   onRename,
@@ -54,13 +52,6 @@ export function Sidebar({
     if (renamingId) return
     onSelect(id)
     setMenuOpenId(null)
-    onNavigate?.()
-  }
-
-  const handleNew = () => {
-    onNewChat()
-    setMenuOpenId(null)
-    setRenamingId(null)
     onNavigate?.()
   }
 
@@ -105,13 +96,6 @@ export function Sidebar({
             />
           </label>
         </div>
-
-        <button type="button" className="sidebar-new-chat" onClick={handleNew}>
-          <span className="sidebar-new-icon" aria-hidden>
-            ✎
-          </span>
-          <span>新的對話</span>
-        </button>
 
         {/* ── Tools（類 Gemini Gem）區塊 ── */}
         <div className="sidebar-gem-section">

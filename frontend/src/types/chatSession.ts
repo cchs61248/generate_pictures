@@ -20,4 +20,4 @@ export type ChatSession = {
   toolId?: string
 }
 
-export const DEFAULT_SESSION_TITLE = "新對話"
+export const DEFAULT_SESSION_TITLE = "AI 電商圖文助手"

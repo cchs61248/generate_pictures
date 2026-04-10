@@ -55,6 +55,8 @@ async def generate_all_images(
     cont = 0
     for item in final_data:
         cont += 1
+        if cont >= 2:
+            break
         sort_num = item["sort"]
         main_name = item["main"].replace('Prompt', '')
         image_prompt = compose_image_prompt(picture_style_template, item)
@@ -163,8 +165,6 @@ async def generate_all_images(
                         "line": err.strip(),
                     }
                 )
-        if cont >= 2:
-            break
     if saved_files:
         done_msg = "✅ [階段三完成] 所有圖片已儲存至 picture/ 資料夾。"
         print(f"\n{done_msg}")
