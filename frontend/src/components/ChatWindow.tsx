@@ -123,41 +123,43 @@ export function ChatWindow({
         className="chat-messages"
         onScroll={handleScroll}
       >
-        {messages.length === 0 && (() => {
-          const tool = toolId ? getToolById(toolId) : undefined
-          return (
-            <div className="chat-empty">
-              {tool ? (
-                <p className="chat-empty-tool-icon" aria-hidden>{tool.icon}</p>
-              ) : null}
-              <p className="chat-empty-title">
-                {tool ? tool.chatTitle : "AI 電商圖文助手"}
-              </p>
-              <p className="chat-empty-hint">
-                {tool
-                  ? tool.description
-                  : "請先上傳一張商品圖（📎），輸入問題後送出。產生的圖會顯示在對話中。"}
-              </p>
+        <div className="chat-content-inner">
+          {messages.length === 0 && (() => {
+            const tool = toolId ? getToolById(toolId) : undefined
+            return (
+              <div className="chat-empty">
+                {tool ? (
+                  <p className="chat-empty-tool-icon" aria-hidden>{tool.icon}</p>
+                ) : null}
+                <p className="chat-empty-title">
+                  {tool ? tool.chatTitle : "AI 電商圖文助手"}
+                </p>
+                <p className="chat-empty-hint">
+                  {tool
+                    ? tool.description
+                    : "請先上傳一張商品圖（📎），輸入問題後送出。產生的圖會顯示在對話中。"}
+                </p>
+              </div>
+            )
+          })()}
+          {messages.map((m) => (
+            <MessageBubble key={m.id} message={m} />
+          ))}
+          {streaming ? (
+            <div
+              className="msg-row msg-row--assistant"
+              aria-live="polite"
+              aria-label={streamPrimed ? "AI 生成中" : "AI 回應中"}
+            >
+              <div className="msg-bubble msg-bubble--assistant msg-bubble--typing">
+                <span className="typing-dot" />
+                <span className="typing-dot" />
+                <span className="typing-dot" />
+              </div>
             </div>
-          )
-        })()}
-        {messages.map((m) => (
-          <MessageBubble key={m.id} message={m} />
-        ))}
-        {streaming ? (
-          <div
-            className="msg-row msg-row--assistant"
-            aria-live="polite"
-            aria-label={streamPrimed ? "AI 生成中" : "AI 回應中"}
-          >
-            <div className="msg-bubble msg-bubble--assistant msg-bubble--typing">
-              <span className="typing-dot" />
-              <span className="typing-dot" />
-              <span className="typing-dot" />
-            </div>
-          </div>
-        ) : null}
-        <div ref={bottomRef} />
+          ) : null}
+          <div ref={bottomRef} />
+        </div>
       </div>
     </div>
   )

@@ -668,7 +668,9 @@ export default function App() {
           </header>
           <main
             className={
-              mainView === "settings" ? "app-main app-main--settings" : "app-main"
+              mainView === "settings"
+                ? "app-main app-main--settings"
+                : "app-main app-main--chat"
             }
           >
             {mainView === "settings" ? (

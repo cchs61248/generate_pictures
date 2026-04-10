@@ -68,68 +68,70 @@ export function InputBar({
 
   return (
     <div className="input-bar">
-      {thumbSrc ? (
-        <div className="input-preview">
-          <img src={thumbSrc} alt="" className="input-preview-img" />
+      <div className="input-bar-inner">
+        {thumbSrc ? (
+          <div className="input-preview">
+            <img src={thumbSrc} alt="" className="input-preview-img" />
+            <button
+              type="button"
+              className="input-preview-remove"
+              onClick={clearFile}
+              aria-label="移除圖片"
+            >
+              ×
+            </button>
+            {uploading && <span className="input-preview-badge">上傳中…</span>}
+          </div>
+        ) : null}
+        <div className="input-row">
+          <input
+            ref={fileRef}
+            id={inputId}
+            type="file"
+            accept="image/*"
+            className="input-file-hidden"
+            onChange={handleFileInput}
+            aria-hidden={true}
+            tabIndex={-1}
+          />
           <button
             type="button"
-            className="input-preview-remove"
-            onClick={clearFile}
-            aria-label="移除圖片"
+            className="input-attach"
+            onClick={handlePick}
+            disabled={disabled || uploading || showCompleted}
+            title="上傳一張圖片（再次選取會覆蓋）"
+            aria-label="上傳圖片"
           >
-            ×
+            📎
           </button>
-          {uploading && <span className="input-preview-badge">上傳中…</span>}
+          <textarea
+            className="input-text"
+            rows={2}
+            placeholder={
+              showCompleted
+                ? "任務完成"
+                : "輸入商品描述、網址或問題…（Enter 送出，Shift+Enter 換行）"
+            }
+            value={displayText}
+            onChange={(e) => onChange(e.target.value)}
+            onKeyDown={handleKeyDown}
+            disabled={disabled || uploading || showCompleted}
+          />
+          <button
+            type="button"
+            className={isStreaming ? "input-stop" : "input-send"}
+            onClick={isStreaming ? onStop : onSend}
+            disabled={uploading || showCompleted || (!isStreaming && disabled)}
+          >
+            {isStreaming ? "停止" : "送出"}
+          </button>
         </div>
-      ) : null}
-      <div className="input-row">
-        <input
-          ref={fileRef}
-          id={inputId}
-          type="file"
-          accept="image/*"
-          className="input-file-hidden"
-          onChange={handleFileInput}
-          aria-hidden={true}
-          tabIndex={-1}
-        />
-        <button
-          type="button"
-          className="input-attach"
-          onClick={handlePick}
-          disabled={disabled || uploading || showCompleted}
-          title="上傳一張圖片（再次選取會覆蓋）"
-          aria-label="上傳圖片"
-        >
-          📎
-        </button>
-        <textarea
-          className="input-text"
-          rows={2}
-          placeholder={
-            showCompleted
-              ? "任務完成"
-              : "輸入商品描述、網址或問題…（Enter 送出，Shift+Enter 換行）"
-          }
-          value={displayText}
-          onChange={(e) => onChange(e.target.value)}
-          onKeyDown={handleKeyDown}
-          disabled={disabled || uploading || showCompleted}
-        />
-        <button
-          type="button"
-          className={isStreaming ? "input-stop" : "input-send"}
-          onClick={isStreaming ? onStop : onSend}
-          disabled={uploading || showCompleted || (!isStreaming && disabled)}
-        >
-          {isStreaming ? "停止" : "送出"}
-        </button>
+        {(file || uploadedFileName) && (
+          <p className="input-meta">
+            已選：{file?.name ?? uploadedFileName}
+          </p>
+        )}
       </div>
-      {(file || uploadedFileName) && (
-        <p className="input-meta">
-          已選：{file?.name ?? uploadedFileName}
-        </p>
-      )}
     </div>
   )
 }
