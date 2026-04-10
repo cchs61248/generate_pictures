@@ -16,6 +16,8 @@ export type ChatSession = {
   taskCompleted: boolean
   /** 若上次是手動停止，下一次送出前先清空舊訊息 */
   clearOnNextSend: boolean
+  /** 此對話所屬工具 ID（undefined 表示一般對話） */
+  toolId?: string
 }
 
 export const DEFAULT_SESSION_TITLE = "新對話"

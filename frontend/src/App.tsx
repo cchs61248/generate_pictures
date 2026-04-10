@@ -15,6 +15,7 @@ import { InputBar } from "./components/InputBar"
 import { SettingsPage } from "./components/SettingsPage"
 import { Sidebar } from "./components/Sidebar"
 import { readFileAsDataUrl } from "./readFileAsDataUrl"
+import { getToolById } from "./tools"
 import { titleFromMessages } from "./titleUtils"
 import { DEFAULT_SESSION_TITLE, type ChatSession } from "./types/chatSession"
 import { useObjectUrlForFile } from "./useObjectUrlForFile"
@@ -24,7 +25,7 @@ function newId(): string {
   return crypto.randomUUID()
 }
 
-function createSession(): ChatSession {
+function createSession(toolId?: string): ChatSession {
   return {
     id: newId(),
     title: DEFAULT_SESSION_TITLE,
@@ -34,6 +35,7 @@ function createSession(): ChatSession {
     streamPrimed: false,
     taskCompleted: false,
     clearOnNextSend: false,
+    toolId,
   }
 }
 
@@ -86,6 +88,11 @@ export default function App() {
     typeof window !== "undefined" ? window.innerWidth > 900 : true,
   )
   const [mainView, setMainView] = useState<"chat" | "settings">("chat")
+  /**
+   * 點擊工具後建立的「暫存對話」，尚未加入 sessions。
+   * 送出第一筆訊息時才正式 commit 進 sessions。
+   */
+  const [pendingToolSession, setPendingToolSession] = useState<ChatSession | null>(null)
 
   const setSessions = useCallback(
     (updater: ChatSession[] | ((prev: ChatSession[]) => ChatSession[])) => {
@@ -138,10 +145,12 @@ export default function App() {
     })
   }, [activeId, baseUrl, hydratedFromServer, sessions])
 
-  const activeSession = useMemo(
-    () => sessions.find((s) => s.id === activeId),
-    [sessions, activeId],
-  )
+  const activeSession = useMemo(() => {
+    if (pendingToolSession && pendingToolSession.id === activeId) {
+      return pendingToolSession
+    }
+    return sessions.find((s) => s.id === activeId)
+  }, [sessions, activeId, pendingToolSession])
   const messages = activeSession?.messages ?? []
   const activeStreaming = activeSession?.isRunning ?? false
   const activeStreamPrimed = activeSession?.streamPrimed ?? false
@@ -171,6 +180,7 @@ export default function App() {
 
   const patchActiveSession = useCallback(
     (fn: (session: ChatSession) => ChatSession) => {
+      setPendingToolSession((p) => (p && p.id === activeId ? fn(p) : p))
       setSessions((prev) =>
         prev.map((s) => (s.id === activeId ? fn(s) : s)),
       )
@@ -180,6 +190,7 @@ export default function App() {
 
   const patchSession = useCallback(
     (sessionId: string, fn: (session: ChatSession) => ChatSession) => {
+      setPendingToolSession((p) => (p && p.id === sessionId ? fn(p) : p))
       setSessions((prev) =>
         prev.map((s) => (s.id === sessionId ? fn(s) : s)),
       )
@@ -189,18 +200,16 @@ export default function App() {
 
   const patchSessionMessages = useCallback(
     (sessionId: string, fn: (prev: ChatMessage[]) => ChatMessage[]) => {
+      const applyMsgs = (s: ChatSession): ChatSession => {
+        const nextMessages = fn(s.messages)
+        const title = titleFromMessages(nextMessages, s.title)
+        return { ...s, messages: nextMessages, title, updatedAt: Date.now() }
+      }
+      setPendingToolSession((p) =>
+        p && p.id === sessionId ? applyMsgs(p) : p,
+      )
       setSessions((prev) =>
-        prev.map((s) => {
-          if (s.id != sessionId) return s
-          const nextMessages = fn(s.messages)
-          const title = titleFromMessages(nextMessages, s.title)
-          return {
-            ...s,
-            messages: nextMessages,
-            title,
-            updatedAt: Date.now(),
-          }
-        }),
+        prev.map((s) => (s.id === sessionId ? applyMsgs(s) : s)),
       )
     },
     [setSessions],
@@ -240,18 +249,14 @@ export default function App() {
 
   const patchActiveMessages = useCallback(
     (fn: (prev: ChatMessage[]) => ChatMessage[]) => {
+      const applyMsgs = (s: ChatSession): ChatSession => {
+        const nextMessages = fn(s.messages)
+        const title = titleFromMessages(nextMessages, s.title)
+        return { ...s, messages: nextMessages, title, updatedAt: Date.now() }
+      }
+      setPendingToolSession((p) => (p && p.id === activeId ? applyMsgs(p) : p))
       setSessions((prev) =>
-        prev.map((s) => {
-          if (s.id !== activeId) return s
-          const nextMessages = fn(s.messages)
-          const title = titleFromMessages(nextMessages, s.title)
-          return {
-            ...s,
-            messages: nextMessages,
-            title,
-            updatedAt: Date.now(),
-          }
-        }),
+        prev.map((s) => (s.id === activeId ? applyMsgs(s) : s)),
       )
     },
     [activeId, setSessions],
@@ -269,16 +274,31 @@ export default function App() {
   const handleNewChat = useCallback(() => {
     setMainView("chat")
     flushMessagesScroll()
+    setPendingToolSession(null)
     const s = createSession()
     setSessions((prev) => [s, ...prev])
     setActiveIdOnly(s.id)
     resetInputAndUpload()
   }, [flushMessagesScroll, resetInputAndUpload, setActiveIdOnly, setSessions])
 
+  const handleNewToolChat = useCallback(
+    (toolId: string) => {
+      setMainView("chat")
+      flushMessagesScroll()
+      const s = createSession(toolId)
+      // 暫存，不加入 sessions；等送出第一筆訊息時才 commit
+      setPendingToolSession(s)
+      setActiveIdOnly(s.id)
+      resetInputAndUpload()
+    },
+    [flushMessagesScroll, resetInputAndUpload, setActiveIdOnly],
+  )
+
   const handleSelectChat = useCallback(
     (id: string) => {
       setMainView("chat")
       flushMessagesScroll()
+      setPendingToolSession(null)
       setActiveIdOnly(id)
       resetInputAndUpload()
     },
@@ -385,6 +405,12 @@ export default function App() {
         },
       ])
       return
+    }
+
+    // 若為暫存工具對話，送出時才正式加入 sessions
+    if (pendingToolSession && pendingToolSession.id === activeId) {
+      setSessions((prev) => [pendingToolSession, ...prev])
+      setPendingToolSession(null)
     }
 
     let imageSnapshot: string | undefined
@@ -568,6 +594,8 @@ export default function App() {
     serverReady,
     clearOnNextSend,
     inputText,
+    pendingToolSession,
+    setSessions,
     patchActiveSession,
     patchActiveMessages,
     patchSession,
@@ -592,6 +620,7 @@ export default function App() {
           sessions={sessions}
           activeId={activeId}
           onNewChat={handleNewChat}
+          onNewToolChat={handleNewToolChat}
           onSelect={handleSelectChat}
           onRename={handleRenameSession}
           onDelete={handleDeleteChat}
@@ -624,7 +653,11 @@ export default function App() {
             ) : null}
             <div className="app-header-titles">
               <h1 className="app-title">
-                {mainView === "settings" ? "設定與說明" : "AI 電商圖文助手"}
+                {mainView === "settings"
+                  ? "設定與說明"
+                  : activeSession?.toolId
+                    ? (getToolById(activeSession.toolId)?.chatTitle ?? "AI 助手")
+                    : "AI 電商圖文助手"}
               </h1>
               <p className="app-sub">API：{baseUrl}</p>
             </div>
@@ -647,6 +680,7 @@ export default function App() {
                   messages={messages}
                   streaming={activeStreaming}
                   streamPrimed={activeStreamPrimed}
+                  toolId={activeSession?.toolId}
                 />
                 <InputBar
                   value={inputText}

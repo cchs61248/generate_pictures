@@ -5,6 +5,7 @@ import {
   useRef,
 } from "react"
 import type { ChatMessage } from "../api"
+import { getToolById } from "../tools"
 import { MessageBubble } from "./Message"
 
 type Props = {
@@ -21,6 +22,8 @@ type Props = {
   /** 串流進行中且尚未收到任何後端事件時，顯示簡短連線提示（不使用三點動畫佔滿） */
   streaming: boolean
   streamPrimed: boolean
+  /** 此對話所屬的工具 ID */
+  toolId?: string
 }
 
 export function ChatWindow({
@@ -32,6 +35,7 @@ export function ChatWindow({
   messages,
   streaming,
   streamPrimed,
+  toolId,
 }: Props) {
   const bottomRef = useRef<HTMLDivElement>(null)
   const messagesElRef = useRef<HTMLDivElement>(null)
@@ -119,14 +123,24 @@ export function ChatWindow({
         className="chat-messages"
         onScroll={handleScroll}
       >
-        {messages.length === 0 && (
-          <div className="chat-empty">
-            <p className="chat-empty-title">AI 電商圖文助手</p>
-            <p className="chat-empty-hint">
-              請先上傳一張商品圖（📎），輸入問題後送出。產生的圖會顯示在對話中。
-            </p>
-          </div>
-        )}
+        {messages.length === 0 && (() => {
+          const tool = toolId ? getToolById(toolId) : undefined
+          return (
+            <div className="chat-empty">
+              {tool ? (
+                <p className="chat-empty-tool-icon" aria-hidden>{tool.icon}</p>
+              ) : null}
+              <p className="chat-empty-title">
+                {tool ? tool.chatTitle : "AI 電商圖文助手"}
+              </p>
+              <p className="chat-empty-hint">
+                {tool
+                  ? tool.description
+                  : "請先上傳一張商品圖（📎），輸入問題後送出。產生的圖會顯示在對話中。"}
+              </p>
+            </div>
+          )
+        })()}
         {messages.map((m) => (
           <MessageBubble key={m.id} message={m} />
         ))}

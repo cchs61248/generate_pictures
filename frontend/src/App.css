@@ -422,6 +422,112 @@
   opacity: 0.9;
 }
 
+/* ── Tools / Gem 區塊 ── */
+.sidebar-gem-section {
+  flex-shrink: 0;
+  margin-bottom: 0.25rem;
+}
+
+.sidebar-gem-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  width: 100%;
+  padding: 0.5rem 0.65rem;
+  border: none;
+  border-radius: 999px;
+  background: transparent;
+  color: rgba(227, 227, 227, 0.72);
+  font-size: 0.82rem;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  cursor: pointer;
+  text-align: left;
+  transition: background 0.15s ease;
+}
+
+.sidebar-gem-header:hover {
+  background: rgba(255, 255, 255, 0.06);
+}
+
+.sidebar-gem-header-left {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.sidebar-gem-icon {
+  font-size: 0.85rem;
+  opacity: 0.85;
+  color: #a8c7fa;
+}
+
+.sidebar-gem-label {
+  text-transform: uppercase;
+}
+
+.sidebar-gem-chevron {
+  font-size: 1.05rem;
+  opacity: 0.55;
+  transform: rotate(90deg);
+  transition: transform 0.2s ease;
+  display: inline-block;
+  line-height: 1;
+}
+
+.sidebar-gem-chevron--open {
+  transform: rotate(-90deg);
+}
+
+.sidebar-gem-list {
+  list-style: none;
+  margin: 0.2rem 0 0.4rem;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.sidebar-gem-item {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  width: 100%;
+  padding: 0.55rem 0.85rem;
+  border: none;
+  border-radius: 999px;
+  background: transparent;
+  color: #e3e3e3;
+  font-size: 0.88rem;
+  cursor: pointer;
+  text-align: left;
+  transition: background 0.15s ease;
+}
+
+.sidebar-gem-item:hover {
+  background: rgba(168, 199, 250, 0.12);
+  color: #a8c7fa;
+}
+
+.sidebar-gem-item-icon {
+  font-size: 1rem;
+  flex-shrink: 0;
+}
+
+.sidebar-gem-item-name {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.sidebar-chat-tool-badge {
+  font-size: 0.82rem;
+  flex-shrink: 0;
+  opacity: 0.8;
+}
+
 .sidebar-section-label {
   flex-shrink: 0;
   margin: 0.35rem 0 0.4rem 0.5rem;
@@ -646,6 +752,12 @@
   text-align: center;
   padding: 2rem 1rem;
   color: rgba(232, 238, 245, 0.55);
+}
+
+.chat-empty-tool-icon {
+  margin: 0 0 0.65rem;
+  font-size: 2.5rem;
+  line-height: 1;
 }
 
 .chat-empty-title {

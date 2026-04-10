@@ -1,10 +1,12 @@
 import { useEffect, useMemo, useRef, useState } from "react"
 import type { ChatSession } from "../types/chatSession"
+import { TOOLS } from "../tools"
 
 type Props = {
   sessions: ChatSession[]
   activeId: string
   onNewChat: () => void
+  onNewToolChat: (toolId: string) => void
   onSelect: (id: string) => void
   onRename: (id: string, newTitle: string) => void
   onDelete: (id: string) => void
@@ -18,6 +20,7 @@ export function Sidebar({
   sessions,
   activeId,
   onNewChat,
+  onNewToolChat,
   onSelect,
   onRename,
   onDelete,
@@ -30,8 +33,8 @@ export function Sidebar({
   const [renamingId, setRenamingId] = useState<string | null>(null)
   const [renameDraft, setRenameDraft] = useState("")
   const renameInputRef = useRef<HTMLInputElement>(null)
-  /** Escape 後若觸發 blur，不寫入檔名 */
   const skipRenameBlurRef = useRef(false)
+  const [toolsExpanded, setToolsExpanded] = useState(true)
 
   /** 依 sessions 陣列順序顯示（新建在前），不因訊息／任務更新而重排 */
   const filtered = useMemo(() => {
@@ -56,6 +59,13 @@ export function Sidebar({
 
   const handleNew = () => {
     onNewChat()
+    setMenuOpenId(null)
+    setRenamingId(null)
+    onNavigate?.()
+  }
+
+  const handleToolClick = (toolId: string) => {
+    onNewToolChat(toolId)
     setMenuOpenId(null)
     setRenamingId(null)
     onNavigate?.()
@@ -102,6 +112,47 @@ export function Sidebar({
           </span>
           <span>新的對話</span>
         </button>
+
+        {/* ── Tools（類 Gemini Gem）區塊 ── */}
+        <div className="sidebar-gem-section">
+          <button
+            type="button"
+            className="sidebar-gem-header"
+            aria-expanded={toolsExpanded}
+            onClick={() => setToolsExpanded((v) => !v)}
+          >
+            <span className="sidebar-gem-header-left">
+              <span className="sidebar-gem-icon" aria-hidden>✦</span>
+              <span className="sidebar-gem-label">Tools</span>
+            </span>
+            <span
+              className={`sidebar-gem-chevron ${toolsExpanded ? "sidebar-gem-chevron--open" : ""}`}
+              aria-hidden
+            >
+              ›
+            </span>
+          </button>
+
+          {toolsExpanded && (
+            <ul className="sidebar-gem-list" role="list">
+              {TOOLS.map((tool) => (
+                <li key={tool.id}>
+                  <button
+                    type="button"
+                    className="sidebar-gem-item"
+                    title={tool.description}
+                    onClick={() => handleToolClick(tool.id)}
+                  >
+                    <span className="sidebar-gem-item-icon" aria-hidden>
+                      {tool.icon}
+                    </span>
+                    <span className="sidebar-gem-item-name">{tool.name}</span>
+                  </button>
+                </li>
+              ))}
+            </ul>
+          )}
+        </div>
 
         <p className="sidebar-section-label">對話</p>
         <ul className="sidebar-list">
@@ -151,6 +202,11 @@ export function Sidebar({
                       aria-label="執行中"
                       title="執行中"
                     />
+                  ) : null}
+                  {s.toolId ? (
+                    <span className="sidebar-chat-tool-badge" aria-hidden>
+                      {TOOLS.find((t) => t.id === s.toolId)?.icon ?? "✦"}
+                    </span>
                   ) : null}
                   <span className="sidebar-chat-title">{s.title}</span>
                 </span>
