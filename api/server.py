@@ -91,19 +91,24 @@ def _session_state_path(project_root: str) -> str:
 def _load_session_state(project_root: str) -> dict:
     path = _session_state_path(project_root)
     if not os.path.exists(path):
-        return {"sessions": [], "activeId": ""}
+        return {"sessions": [], "activeId": "", "version": 0}
     try:
         with open(path, "r", encoding="utf-8") as f:
             data = json.load(f)
         if not isinstance(data, dict):
-            return {"sessions": [], "activeId": ""}
+            return {"sessions": [], "activeId": "", "version": 0}
         sessions = data.get("sessions")
         active_id = data.get("activeId")
-        if not isinstance(sessions, list) or not isinstance(active_id, str):
-            return {"sessions": [], "activeId": ""}
-        return {"sessions": sessions, "activeId": active_id}
+        version = data.get("version", 0)
+        if (
+            not isinstance(sessions, list)
+            or not isinstance(active_id, str)
+            or not isinstance(version, int)
+        ):
+            return {"sessions": [], "activeId": "", "version": 0}
+        return {"sessions": sessions, "activeId": active_id, "version": max(version, 0)}
     except Exception:
-        return {"sessions": [], "activeId": ""}
+        return {"sessions": [], "activeId": "", "version": 0}
 
 
 def _save_session_state(project_root: str, payload: dict) -> dict:
@@ -112,9 +117,18 @@ def _save_session_state(project_root: str, payload: dict) -> dict:
     if not isinstance(sessions, list) or not isinstance(active_id, str):
         raise HTTPException(status_code=400, detail="invalid session state payload")
 
+    expected_version = payload.get("expectedVersion")
+    if not isinstance(expected_version, int):
+        raise HTTPException(status_code=400, detail="expectedVersion must be integer")
+
+    current = _load_session_state(project_root)
+    current_version = int(current.get("version", 0))
+    if expected_version != current_version:
+        raise HTTPException(status_code=409, detail="session state version conflict")
+
     path = _session_state_path(project_root)
     temp_path = f"{path}.tmp"
-    data = {"sessions": sessions, "activeId": active_id}
+    data = {"sessions": sessions, "activeId": active_id, "version": current_version + 1}
     with open(temp_path, "w", encoding="utf-8") as f:
         json.dump(data, f, ensure_ascii=False)
     os.replace(temp_path, path)

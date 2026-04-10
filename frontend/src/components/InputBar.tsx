@@ -1,4 +1,4 @@
-import { useId, useRef } from "react"
+import { useEffect, useId, useRef } from "react"
 
 type Props = {
   value: string
@@ -20,6 +20,8 @@ type Props = {
   onFileChange: (file: File | null) => void
   uploading: boolean
   lockImageThread?: boolean
+  onFallbackSampleStatusChange?: (missing: boolean) => void
+  showReferenceMissingWarning?: boolean
 }
 
 export function InputBar({
@@ -38,9 +40,12 @@ export function InputBar({
   onFileChange,
   uploading,
   lockImageThread = false,
+  onFallbackSampleStatusChange,
+  showReferenceMissingWarning = false,
 }: Props) {
   const thumbSrc =
     previewUrl ?? inputPreviewDataUrl ?? fallbackSamplePreviewUrl ?? null
+  const usingFallbackSample = !previewUrl && !inputPreviewDataUrl && Boolean(fallbackSamplePreviewUrl)
   const showCompleted = taskCompleted && !isStreaming
   const displayText = showCompleted ? "任務完成" : value
   const inputId = useId()
@@ -68,12 +73,28 @@ export function InputBar({
     }
   }
 
+  useEffect(() => {
+    if (!usingFallbackSample) {
+      onFallbackSampleStatusChange?.(false)
+    }
+  }, [onFallbackSampleStatusChange, usingFallbackSample])
+
   return (
     <div className="input-bar">
       <div className="input-bar-inner">
         {thumbSrc ? (
           <div className="input-preview">
-            <img src={thumbSrc} alt="" className="input-preview-img" />
+            <img
+              src={thumbSrc}
+              alt=""
+              className="input-preview-img"
+              onLoad={() => {
+                if (usingFallbackSample) onFallbackSampleStatusChange?.(false)
+              }}
+              onError={() => {
+                if (usingFallbackSample) onFallbackSampleStatusChange?.(true)
+              }}
+            />
             {lockImageThread ? null : (
               <button
                 type="button"
@@ -137,6 +158,9 @@ export function InputBar({
             已選：{file?.name ?? uploadedFileName}
           </p>
         )}
+        {showReferenceMissingWarning ? (
+          <p className="input-meta input-meta--warn">此子串參考圖遺失</p>
+        ) : null}
       </div>
     </div>
   )

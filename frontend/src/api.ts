@@ -117,6 +117,7 @@ export type RunResponse = {
 export type SessionStatePayload = {
   sessions: unknown[]
   activeId: string
+  version: number
 }
 
 export async function fetchSessionState(
@@ -125,7 +126,11 @@ export async function fetchSessionState(
   const res = await fetch(`${trimSlash(baseUrl)}/session-state`)
   if (!res.ok) return null
   const data = (await res.json()) as SessionStatePayload
-  if (!Array.isArray(data.sessions) || typeof data.activeId !== "string") {
+  if (
+    !Array.isArray(data.sessions) ||
+    typeof data.activeId !== "string" ||
+    typeof data.version !== "number"
+  ) {
     return null
   }
   return data
@@ -225,8 +230,8 @@ export async function saveEnvSettings(
 
 export async function saveSessionState(
   baseUrl: string,
-  payload: SessionStatePayload,
-): Promise<void> {
+  payload: SessionStatePayload & { expectedVersion: number },
+): Promise<SessionStatePayload> {
   const res = await fetch(`${trimSlash(baseUrl)}/session-state`, {
     method: "PUT",
     headers: { "Content-Type": "application/json" },
@@ -235,8 +240,20 @@ export async function saveSessionState(
   if (!res.ok) {
     const body = await safeJson(res)
     const detail = extractDetail(body)
+    if (res.status === 409) {
+      throw new Error("SESSION_STATE_CONFLICT")
+    }
     throw new Error(detail || `儲存 session 失敗 (${res.status})`)
   }
+  const data = (await res.json()) as SessionStatePayload
+  if (
+    !Array.isArray(data.sessions) ||
+    typeof data.activeId !== "string" ||
+    typeof data.version !== "number"
+  ) {
+    throw new Error("儲存 session 回應格式錯誤")
+  }
+  return data
 }
 
 export async function runGeneration(

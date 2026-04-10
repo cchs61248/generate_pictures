@@ -176,7 +176,9 @@ export default function App() {
   const [inputPreviewActive, setInputPreviewActive] = useState(false)
   const [samplePreviewEpoch, setSamplePreviewEpoch] = useState(0)
   const [serverReady, setServerReady] = useState(false)
+  const [threadReferenceMissing, setThreadReferenceMissing] = useState(false)
   const [hydratedFromServer, setHydratedFromServer] = useState(false)
+  const sessionVersionRef = useRef(0)
   const runControllersRef = useRef<Map<string, AbortController>>(new Map())
   /** 由 ChatWindow 註冊：切換／新建對話前先寫入目前訊息區捲動位置 */
   const messagesScrollFlushRef = useRef<() => void>(() => {})
@@ -268,6 +270,7 @@ export default function App() {
   useEffect(() => {
     if (!activeId) return
     restoreComposerState(activeId)
+    setThreadReferenceMissing(false)
   }, [activeId, restoreComposerState])
 
   const setSessions = useCallback(
@@ -297,6 +300,7 @@ export default function App() {
           const remoteSessions = remote.sessions as ChatSession[]
           if (!remoteSessions.length) return prev
           const activeOk = remoteSessions.some((s) => s.id === remote.activeId)
+          sessionVersionRef.current = remote.version
           return {
             sessions: remoteSessions,
             activeId: activeOk ? remote.activeId : remoteSessions[0].id,
@@ -316,9 +320,38 @@ export default function App() {
   useEffect(() => {
     savePersistedState({ sessions, activeId })
     if (!hydratedFromServer) return
-    void saveSessionState(baseUrl, { sessions, activeId }).catch(() => {
-      // 後端暫時不可用時保留本地狀態，不阻斷操作
-    })
+    void (async () => {
+      try {
+        const saved = await saveSessionState(baseUrl, {
+          sessions,
+          activeId,
+          version: sessionVersionRef.current,
+          expectedVersion: sessionVersionRef.current,
+        })
+        sessionVersionRef.current = saved.version
+      } catch (e) {
+        const msg = e instanceof Error ? e.message : String(e)
+        if (msg === "SESSION_STATE_CONFLICT") {
+          const remote = await fetchSessionState(baseUrl)
+          if (!remote) return
+          const remoteSessions = remote.sessions as ChatSession[]
+          if (!remoteSessions.length) return
+          const keepCurrentActive = remoteSessions.some((s) => s.id === activeId)
+          const remoteActiveOk = remoteSessions.some((s) => s.id === remote.activeId)
+          sessionVersionRef.current = remote.version
+          setBoth({
+            sessions: remoteSessions,
+            activeId: keepCurrentActive
+              ? activeId
+              : remoteActiveOk
+                ? remote.activeId
+                : remoteSessions[0].id,
+          })
+          return
+        }
+        // 後端暫時不可用時保留本地狀態，不阻斷操作
+      }
+    })()
   }, [activeId, baseUrl, hydratedFromServer, sessions])
 
   const activeSession = useMemo(() => {
@@ -334,17 +367,29 @@ export default function App() {
   const clearOnNextSend = activeSession?.clearOnNextSend ?? false
   const imageThreadLocked = activeSession?.imageThreadLocked ?? false
 
+  useEffect(() => {
+    if (!activeId) return
+    if (activeSession?.imageThreadLocked) {
+      // 子 session 在跨瀏覽器刷新時，直接以當前 session 當作預覽 owner，
+      // 讓 fallback /sample-reference 立刻可用，不受本地快取影響。
+      setInputAssetSessionId(activeId)
+    }
+  }, [activeId, activeSession?.imageThreadLocked])
+
   const fallbackSamplePreviewUrl = useMemo(() => {
-    if (!serverReady) return null
-    if (inputAssetSessionId !== activeId) return null
+    const lockedThread = Boolean(activeSession?.imageThreadLocked)
+    // 子 session 直接走後端預覽，不受 inputAssetSessionId 限制
+    if (!lockedThread && inputAssetSessionId !== activeId) return null
+    if (!lockedThread && !serverReady) return null
     // 本地仍有 File 時由 blob URL 顯示，避免在 object URL 就緒前閃爍後端舊圖
     if (file) return null
-    if (!uploadedFileName) return null
+    if (!lockedThread && !uploadedFileName) return null
     if (fileObjectUrl || inputPreviewDataUrl) return null
-    if (!inputPreviewActive) return null
+    if (!lockedThread && !inputPreviewActive) return null
     const base = baseUrl.replace(/\/+$/, "")
     return `${base}/sample-reference?session_id=${encodeURIComponent(activeId)}&v=${samplePreviewEpoch}`
   }, [
+    activeSession?.imageThreadLocked,
     activeId,
     baseUrl,
     file,
@@ -541,6 +586,11 @@ export default function App() {
       setPendingToolSession(nextPending)
     }
   }, [baseUrl, flushMessagesScroll, sessions])
+
+  const handleOpenSettings = useCallback(() => {
+    flushMessagesScroll()
+    setMainView("settings")
+  }, [flushMessagesScroll])
 
   const handleRenameSession = useCallback(
     (id: string, newTitle: string) => {
@@ -1039,7 +1089,7 @@ export default function App() {
           onRename={handleRenameSession}
           onDelete={handleDeleteChat}
           settingsActive={mainView === "settings"}
-          onOpenSettings={() => setMainView("settings")}
+          onOpenSettings={handleOpenSettings}
           onNavigate={() => {
             if (typeof window !== "undefined" && window.matchMedia("(max-width: 900px)").matches) {
               setSidebarOpen(false)
@@ -1125,9 +1175,19 @@ export default function App() {
                     inputAssetSessionId === activeId ? inputPreviewDataUrl : null
                   }
                   fallbackSamplePreviewUrl={
-                    inputAssetSessionId === activeId
+                    imageThreadLocked || inputAssetSessionId === activeId
                       ? fallbackSamplePreviewUrl
                       : null
+                  }
+                  onFallbackSampleStatusChange={(missing) => {
+                    if (!imageThreadLocked) {
+                      setThreadReferenceMissing(false)
+                      return
+                    }
+                    setThreadReferenceMissing(missing)
+                  }}
+                  showReferenceMissingWarning={
+                    imageThreadLocked && threadReferenceMissing
                   }
                   onFileChange={handleFileChange}
                   uploading={uploading}

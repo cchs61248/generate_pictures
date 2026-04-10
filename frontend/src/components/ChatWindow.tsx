@@ -55,6 +55,8 @@ export function ChatWindow({
       if (el) persistScrollTopNow(sessionId, el.scrollTop)
     }
     return () => {
+      const el = messagesElRef.current
+      if (el) persistScrollTopNow(sessionId, el.scrollTop)
       scrollFlushRef.current = () => {}
     }
   }, [persistScrollTopNow, scrollFlushRef, sessionId])

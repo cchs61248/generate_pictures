@@ -1401,6 +1401,10 @@
   color: rgba(232, 238, 245, 0.4);
 }
 
+.input-meta--warn {
+  color: #fca5a5;
+}
+
 /* 深色主題捲動條：與頁面視覺一致、低突兀（聊天室、側欄、設定頁同風格） */
 .chat-messages,
 .sidebar-list,
