@@ -918,6 +918,8 @@ export default function App() {
 
   const handleOpenImageThread = useCallback(
     async (imageUrl: string, bubbleTitle: string, sourceKey: string) => {
+      // 子 session 不允許再開啟下一層子 session
+      if (activeSession?.parentId) return
       persistComposerState(activeId)
       const parentId = activeSession?.parentId ?? activeSession?.id
       if (!parentId) return
@@ -1095,7 +1097,9 @@ export default function App() {
                   streaming={activeStreaming}
                   streamPrimed={activeStreamPrimed}
                   toolId={activeSession?.toolId}
-                  onOpenImageThread={handleOpenImageThread}
+                  onOpenImageThread={
+                    activeSession?.parentId ? undefined : handleOpenImageThread
+                  }
                 />
                 <InputBar
                   value={inputText}
