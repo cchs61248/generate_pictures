@@ -78,6 +78,28 @@ function insertChildSession(
   return [...prev.slice(0, insertAt), child, ...prev.slice(insertAt)]
 }
 
+type SessionComposerState = {
+  inputText: string
+  file: File | null
+  uploadedFileName: string | null
+  inputPreviewDataUrl: string | null
+  inputPreviewActive: boolean
+  serverReady: boolean
+  samplePreviewEpoch: number
+}
+
+function emptyComposerState(): SessionComposerState {
+  return {
+    inputText: "",
+    file: null,
+    uploadedFileName: null,
+    inputPreviewDataUrl: null,
+    inputPreviewActive: false,
+    serverReady: false,
+    samplePreviewEpoch: 0,
+  }
+}
+
 function createDefaultTemporaryToolSession(): ChatSession {
   const defaultToolId = TOOLS[0]?.id
   return createSession(defaultToolId)
@@ -172,6 +194,81 @@ export default function App() {
   const [pendingToolSession, setPendingToolSession] = useState<ChatSession | null>(
     () => boot.pendingToolSession,
   )
+  const composerBySessionRef = useRef<Record<string, SessionComposerState>>({})
+
+  const persistComposerState = useCallback(
+    (sessionId: string) => {
+      if (!sessionId) return
+      if (inputAssetSessionId !== sessionId) {
+        composerBySessionRef.current[sessionId] = {
+          ...emptyComposerState(),
+          inputText,
+        }
+        return
+      }
+      composerBySessionRef.current[sessionId] = {
+        inputText,
+        file,
+        uploadedFileName,
+        inputPreviewDataUrl,
+        inputPreviewActive,
+        serverReady,
+        samplePreviewEpoch,
+      }
+    },
+    [
+      file,
+      inputAssetSessionId,
+      inputPreviewActive,
+      inputPreviewDataUrl,
+      inputText,
+      samplePreviewEpoch,
+      serverReady,
+      uploadedFileName,
+    ],
+  )
+
+  const restoreComposerState = useCallback((sessionId: string) => {
+    const session = sessions.find((s) => s.id === sessionId)
+    const snap = composerBySessionRef.current[sessionId] ?? emptyComposerState()
+    const useSessionReferenceFallback =
+      !snap.file &&
+      !snap.uploadedFileName &&
+      !snap.inputPreviewDataUrl &&
+      !snap.inputPreviewActive &&
+      !!session?.referenceImageName
+    const resolvedUploadedName = useSessionReferenceFallback
+      ? (session?.referenceImageName ?? null)
+      : snap.uploadedFileName
+    const resolvedPreviewActive = useSessionReferenceFallback
+      ? true
+      : snap.inputPreviewActive
+    const resolvedServerReady = useSessionReferenceFallback
+      ? true
+      : snap.serverReady
+    setInputText(snap.inputText)
+    setFile(snap.file)
+    setUploadedFileName(resolvedUploadedName)
+    setInputPreviewDataUrl(snap.inputPreviewDataUrl)
+    setInputPreviewActive(resolvedPreviewActive)
+    setServerReady(resolvedServerReady)
+    setSamplePreviewEpoch(snap.samplePreviewEpoch)
+    if (
+      snap.file ||
+      resolvedUploadedName ||
+      snap.inputPreviewDataUrl ||
+      resolvedPreviewActive
+    ) {
+      setInputAssetSessionId(sessionId)
+    } else {
+      setInputAssetSessionId(null)
+    }
+  }, [sessions])
+
+  useEffect(() => {
+    if (!activeId) return
+    restoreComposerState(activeId)
+  }, [activeId, restoreComposerState])
 
   const setSessions = useCallback(
     (updater: ChatSession[] | ((prev: ChatSession[]) => ChatSession[])) => {
@@ -366,6 +463,7 @@ export default function App() {
         activeId: normalized.activeId,
       })
       setPendingToolSession(normalized.pendingToolSession)
+      composerBySessionRef.current = {}
       resetInputAndUpload()
     }
     window.addEventListener("storage", handleStorage)
@@ -376,26 +474,40 @@ export default function App() {
 
   const handleNewToolChat = useCallback(
     (toolId: string) => {
+      persistComposerState(activeId)
       setMainView("chat")
       flushMessagesScroll()
       const s = createSession(toolId)
       // 暫存，不加入 sessions；等送出第一筆訊息時才 commit
       setPendingToolSession(s)
       setActiveIdOnly(s.id)
-      resetInputAndUpload()
+      restoreComposerState(s.id)
     },
-    [flushMessagesScroll, resetInputAndUpload, setActiveIdOnly],
+    [
+      activeId,
+      flushMessagesScroll,
+      persistComposerState,
+      restoreComposerState,
+      setActiveIdOnly,
+    ],
   )
 
   const handleSelectChat = useCallback(
     (id: string) => {
+      persistComposerState(activeId)
       setMainView("chat")
       flushMessagesScroll()
       setPendingToolSession(null)
       setActiveIdOnly(id)
-      setInputText("")
+      restoreComposerState(id)
     },
-    [flushMessagesScroll, setActiveIdOnly],
+    [
+      activeId,
+      flushMessagesScroll,
+      persistComposerState,
+      restoreComposerState,
+      setActiveIdOnly,
+    ],
   )
 
   const handleDeleteChat = useCallback((id: string) => {
@@ -409,6 +521,7 @@ export default function App() {
       void deleteSessionUpload(sid, baseUrl).catch(() => {
         // 刪除對話時若後端檔案刪除失敗，不阻斷前端對話刪除流程
       })
+      delete composerBySessionRef.current[sid]
     }
     let nextPending: ChatSession | null = null
     setBoth((prev) => {
@@ -449,8 +562,24 @@ export default function App() {
       if (!next) {
         setFile(null)
         setUploadedFileName(null)
+        setInputAssetSessionId(null)
         setInputPreviewDataUrl(null)
         setInputPreviewActive(false)
+        setServerReady(false)
+        composerBySessionRef.current[activeId] = {
+          ...(composerBySessionRef.current[activeId] ?? emptyComposerState()),
+          file: null,
+          uploadedFileName: null,
+          inputPreviewDataUrl: null,
+          inputPreviewActive: false,
+          serverReady: false,
+          samplePreviewEpoch: 0,
+        }
+        patchActiveSession((s) => ({
+          ...s,
+          referenceImageName: undefined,
+          updatedAt: Date.now(),
+        }))
         void deleteSessionUploadImage(activeId, baseUrl).catch(() => {
           // 使用者手動移除預覽時，後端刪檔失敗不阻斷前端操作
         })
@@ -466,14 +595,38 @@ export default function App() {
       try {
         await uploadImage(detached, baseUrl, activeId)
         setUploadedFileName(detached.name)
+        patchActiveSession((s) => ({
+          ...s,
+          referenceImageName: detached.name,
+          updatedAt: Date.now(),
+        }))
         setServerReady(true)
         setInputPreviewActive(true)
-        setSamplePreviewEpoch((e) => e + 1)
+        const nextEpoch = samplePreviewEpoch + 1
+        setSamplePreviewEpoch(nextEpoch)
         try {
           const dataUrl = await readFileAsDataUrl(detached)
           setInputPreviewDataUrl(dataUrl)
+          composerBySessionRef.current[activeId] = {
+            ...(composerBySessionRef.current[activeId] ?? emptyComposerState()),
+            file: detached,
+            uploadedFileName: detached.name,
+            inputPreviewDataUrl: dataUrl,
+            inputPreviewActive: true,
+            serverReady: true,
+            samplePreviewEpoch: nextEpoch,
+          }
         } catch {
           setInputPreviewDataUrl(null)
+          composerBySessionRef.current[activeId] = {
+            ...(composerBySessionRef.current[activeId] ?? emptyComposerState()),
+            file: detached,
+            uploadedFileName: detached.name,
+            inputPreviewDataUrl: null,
+            inputPreviewActive: true,
+            serverReady: true,
+            samplePreviewEpoch: nextEpoch,
+          }
         }
       } catch (e) {
         const msg = e instanceof Error ? e.message : String(e)
@@ -482,6 +635,16 @@ export default function App() {
         setInputAssetSessionId(null)
         setInputPreviewDataUrl(null)
         setInputPreviewActive(false)
+        setServerReady(false)
+        composerBySessionRef.current[activeId] = {
+          ...(composerBySessionRef.current[activeId] ?? emptyComposerState()),
+          file: null,
+          uploadedFileName: null,
+          inputPreviewDataUrl: null,
+          inputPreviewActive: false,
+          serverReady: false,
+          samplePreviewEpoch: 0,
+        }
         patchActiveMessages((m) => [
           ...m,
           {
@@ -492,11 +655,23 @@ export default function App() {
           },
         ])
         setServerReady(false)
+        patchActiveSession((s) => ({
+          ...s,
+          referenceImageName: undefined,
+          updatedAt: Date.now(),
+        }))
       } finally {
         setUploading(false)
       }
     },
-    [activeId, baseUrl, imageThreadLocked, patchActiveMessages, taskCompleted],
+    [
+      activeId,
+      baseUrl,
+      imageThreadLocked,
+      patchActiveMessages,
+      samplePreviewEpoch,
+      taskCompleted,
+    ],
   )
 
   const handleSend = useCallback(async () => {
@@ -552,11 +727,31 @@ export default function App() {
     }
     patchActiveMessages((m) => [...m, userMsg])
     setInputText("")
+    composerBySessionRef.current[activeId] = {
+      ...(composerBySessionRef.current[activeId] ?? emptyComposerState()),
+      inputText: "",
+    }
     if (!imageThreadLocked) {
       setFile(null)
       setUploadedFileName(null)
+      setInputAssetSessionId(null)
       setInputPreviewDataUrl(null)
       setInputPreviewActive(false)
+      setServerReady(false)
+      composerBySessionRef.current[activeId] = {
+        ...(composerBySessionRef.current[activeId] ?? emptyComposerState()),
+        file: null,
+        uploadedFileName: null,
+        inputPreviewDataUrl: null,
+        inputPreviewActive: false,
+        serverReady: false,
+        samplePreviewEpoch: 0,
+      }
+      patchActiveSession((s) => ({
+        ...s,
+        referenceImageName: undefined,
+        updatedAt: Date.now(),
+      }))
     }
     const sessionId = activeId
     patchSession(sessionId, (s) => ({
@@ -722,14 +917,30 @@ export default function App() {
   }, [activeId])
 
   const handleOpenImageThread = useCallback(
-    async (imageUrl: string, bubbleTitle: string) => {
+    async (imageUrl: string, bubbleTitle: string, sourceKey: string) => {
+      persistComposerState(activeId)
       const parentId = activeSession?.parentId ?? activeSession?.id
       if (!parentId) return
+      const existingThread = sessions.find(
+        (s) =>
+          s.parentId === parentId &&
+          s.threadSourceKey === sourceKey &&
+          s.toolId === activeSession?.toolId,
+      )
+      if (existingThread) {
+        setMainView("chat")
+        flushMessagesScroll()
+        setPendingToolSession(null)
+        setActiveIdOnly(existingThread.id)
+        return
+      }
       const threadSession: ChatSession = {
         ...createSession(activeSession?.toolId),
         parentId,
         title: normalizeBubbleTitle(bubbleTitle),
         imageThreadLocked: true,
+        referenceImageName: undefined,
+        threadSourceKey: sourceKey,
       }
       setMainView("chat")
       flushMessagesScroll()
@@ -754,8 +965,23 @@ export default function App() {
         setInputAssetSessionId(threadSession.id)
         setServerReady(true)
         setInputPreviewActive(true)
-        setSamplePreviewEpoch((e) => e + 1)
+        const nextEpoch = samplePreviewEpoch + 1
+        setSamplePreviewEpoch(nextEpoch)
         setInputPreviewDataUrl(null)
+        composerBySessionRef.current[threadSession.id] = {
+          inputText: "",
+          file: null,
+          uploadedFileName: filename,
+          inputPreviewDataUrl: null,
+          inputPreviewActive: true,
+          serverReady: true,
+          samplePreviewEpoch: nextEpoch,
+        }
+        patchSession(threadSession.id, (s) => ({
+          ...s,
+          referenceImageName: filename,
+          updatedAt: Date.now(),
+        }))
         patchSessionMessages(threadSession.id, (m) => [
           ...m,
           {
@@ -783,9 +1009,13 @@ export default function App() {
       activeSession?.toolId,
       activeSession?.id,
       activeSession?.parentId,
+      activeId,
       baseUrl,
       flushMessagesScroll,
       patchSessionMessages,
+      persistComposerState,
+      samplePreviewEpoch,
+      sessions,
       setActiveIdOnly,
       setSessions,
     ],
@@ -869,7 +1099,14 @@ export default function App() {
                 />
                 <InputBar
                   value={inputText}
-                  onChange={setInputText}
+                  onChange={(v) => {
+                    setInputText(v)
+                    composerBySessionRef.current[activeId] = {
+                      ...(composerBySessionRef.current[activeId] ??
+                        emptyComposerState()),
+                      inputText: v,
+                    }
+                  }}
                   onSend={handleSend}
                   onStop={handleStop}
                   disabled={busy}

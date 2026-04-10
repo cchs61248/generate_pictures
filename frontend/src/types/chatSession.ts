@@ -22,6 +22,10 @@ export type ChatSession = {
   toolId?: string
   /** 從生成圖開啟的討論串：固定使用同一張參考圖，不允許改圖 */
   imageThreadLocked?: boolean
+  /** 此 session 綁定的參考圖檔名（存在 uploads/<sessionId>.jpg） */
+  referenceImageName?: string
+  /** 子討論串來源鍵（同一主 session + 同一泡泡圖片只建立一次） */
+  threadSourceKey?: string
 }
 
 export const DEFAULT_SESSION_TITLE = "AI 電商圖文助手"

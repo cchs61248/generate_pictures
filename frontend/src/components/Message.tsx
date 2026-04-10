@@ -4,7 +4,11 @@ import remarkGfm from "remark-gfm"
 
 type Props = {
   message: ChatMessage
-  onOpenImageThread?: (imageUrl: string, bubbleTitle: string) => void
+  onOpenImageThread?: (
+    imageUrl: string,
+    bubbleTitle: string,
+    sourceKey: string,
+  ) => void
 }
 
 export function MessageBubble({ message, onOpenImageThread }: Props) {
@@ -83,7 +87,7 @@ export function MessageBubble({ message, onOpenImageThread }: Props) {
           <div className="msg-generated">
             <p className="msg-generated-title">產生的圖片</p>
             <div className="msg-generated-grid">
-              {message.generatedImages.map((url) => (
+              {message.generatedImages.map((url, idx) => (
                 <div key={url} className="msg-generated-card">
                   <a
                     href={url}
@@ -96,7 +100,13 @@ export function MessageBubble({ message, onOpenImageThread }: Props) {
                   <button
                     type="button"
                     className="msg-generated-thread-btn"
-                    onClick={() => onOpenImageThread?.(url, (message.text ?? "").trim())}
+                    onClick={() =>
+                      onOpenImageThread?.(
+                        url,
+                        (message.text ?? "").trim(),
+                        `${message.id}::${idx}`,
+                      )
+                    }
                   >
                     開啟討論串
                   </button>

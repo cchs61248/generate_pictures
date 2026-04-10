@@ -24,7 +24,11 @@ type Props = {
   streamPrimed: boolean
   /** 此對話所屬的工具 ID */
   toolId?: string
-  onOpenImageThread?: (imageUrl: string, bubbleTitle: string) => void
+  onOpenImageThread?: (
+    imageUrl: string,
+    bubbleTitle: string,
+    sourceKey: string,
+  ) => void
 }
 
 export function ChatWindow({
