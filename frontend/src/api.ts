@@ -73,6 +73,21 @@ export async function deleteSessionUpload(
   }
 }
 
+export async function deleteSessionUploadImage(
+  sessionId: string,
+  baseUrl: string,
+): Promise<void> {
+  const res = await fetch(
+    `${trimSlash(baseUrl)}/session-upload/${encodeURIComponent(sessionId)}/image`,
+    { method: "DELETE" },
+  )
+  if (!res.ok) {
+    const body = await safeJson(res)
+    const detail = extractDetail(body)
+    throw new Error(detail || `刪除上傳圖檔失敗 (${res.status})`)
+  }
+}
+
 export type RunResponse = {
   ok: boolean
   final_output_path: string

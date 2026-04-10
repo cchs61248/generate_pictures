@@ -279,6 +279,25 @@ async def delete_session_upload(session_id: str):
     }
 
 
+@app.delete("/session-upload/{session_id}/image")
+async def delete_session_upload_image(session_id: str):
+    """僅刪除 uploads/<sessionId>.jpg（不存在視為成功）。"""
+    project_root = _project_root()
+    sid = _safe_session_id(session_id)
+    if not sid:
+        raise HTTPException(status_code=400, detail="invalid session_id")
+    upload_path = os.path.join(project_root, "uploads", f"{sid}.jpg")
+    deleted_upload = False
+    if os.path.exists(upload_path):
+        os.remove(upload_path)
+        deleted_upload = True
+    return {
+        "ok": True,
+        "deleted_upload": deleted_upload,
+        "upload_path": upload_path,
+    }
+
+
 @app.post("/run")
 async def run_generation(payload: dict):
     stage3_only = bool(payload.get("stage3_only", False))

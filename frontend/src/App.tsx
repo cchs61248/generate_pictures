@@ -3,6 +3,7 @@ import {
   type ChatMessage,
   consumeRunStream,
   deleteSessionUpload,
+  deleteSessionUploadImage,
   fetchSessionState,
   getApiBaseUrl,
   imageUrlsFromSavedFiles,
@@ -346,6 +347,9 @@ export default function App() {
         setUploadedFileName(null)
         setInputPreviewDataUrl(null)
         setInputPreviewActive(false)
+        void deleteSessionUploadImage(activeId, baseUrl).catch(() => {
+          // 使用者手動移除預覽時，後端刪檔失敗不阻斷前端操作
+        })
         return
       }
 
