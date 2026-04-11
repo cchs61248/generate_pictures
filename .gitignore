@@ -15,9 +15,9 @@ __pycache__/
 *$py.class
 *.so
 .Python
-build/
+/build/
+/dist/
 develop-eggs/
-dist/
 downloads/
 eggs/
 .eggs/
@@ -54,10 +54,13 @@ Desktop.ini
 *.log
 *.tmp
 .cache/
-
 plans/
-*.json
-*.png
-*.jpg
-__init__.py
-*.yml
+
+# 執行產出與本機狀態（非原始碼；勿用 *.json / *.png 等全域規則，以免排除 frontend 設定與靜態資源）
+
+picture/
+uploads/
+template_json/
+data/session_state.json
+/final_output.json
+/data

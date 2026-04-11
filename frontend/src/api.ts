@@ -307,21 +307,32 @@ export async function consumeImageThreadStream(
   }
   const decoder = new TextDecoder()
   let buffer = ""
+  const dispatchSseBlock = (block: string) => {
+    const trimmed = block.trim()
+    if (!trimmed.startsWith("data:")) return
+    const jsonStr = trimmed.slice(5).trimStart()
+    try {
+      onEvent(JSON.parse(jsonStr) as ImageThreadStreamEvent)
+    } catch {
+      /* 略過無法解析的片段 */
+    }
+  }
   while (true) {
     const { done, value } = await reader.read()
+    if (value) buffer += decoder.decode(value, { stream: true })
+    const segments = buffer.split("\n\n")
+    buffer = segments.pop() ?? ""
+    for (const seg of segments) {
+      dispatchSseBlock(seg)
+    }
     if (done) break
-    buffer += decoder.decode(value, { stream: true })
-    const parts = buffer.split("\n\n")
-    buffer = parts.pop() ?? ""
-    for (const part of parts) {
-      const trimmed = part.trim()
-      if (!trimmed.startsWith("data:")) continue
-      const jsonStr = trimmed.slice(5).trimStart()
-      try {
-        onEvent(JSON.parse(jsonStr) as ImageThreadStreamEvent)
-      } catch {
-        /* 略過無法解析的片段 */
-      }
+  }
+  // 最後一段可能沒有尾端 \n\n，導致 complete／error 留在 buffer，await 永不結束
+  const tail = buffer.trim()
+  if (tail) {
+    for (const line of tail.split("\n")) {
+      const t = line.trim()
+      if (t) dispatchSseBlock(t)
     }
   }
 }
@@ -377,21 +388,31 @@ export async function consumeRunStream(
   }
   const decoder = new TextDecoder()
   let buffer = ""
+  const dispatchSseBlock = (block: string) => {
+    const trimmed = block.trim()
+    if (!trimmed.startsWith("data:")) return
+    const jsonStr = trimmed.slice(5).trimStart()
+    try {
+      onEvent(JSON.parse(jsonStr) as StreamEvent)
+    } catch {
+      /* 略過無法解析的片段 */
+    }
+  }
   while (true) {
     const { done, value } = await reader.read()
+    if (value) buffer += decoder.decode(value, { stream: true })
+    const segments = buffer.split("\n\n")
+    buffer = segments.pop() ?? ""
+    for (const seg of segments) {
+      dispatchSseBlock(seg)
+    }
     if (done) break
-    buffer += decoder.decode(value, { stream: true })
-    const parts = buffer.split("\n\n")
-    buffer = parts.pop() ?? ""
-    for (const part of parts) {
-      const trimmed = part.trim()
-      if (!trimmed.startsWith("data:")) continue
-      const jsonStr = trimmed.slice(5).trimStart()
-      try {
-        onEvent(JSON.parse(jsonStr) as StreamEvent)
-      } catch {
-        /* 略過無法解析的片段 */
-      }
+  }
+  const tail = buffer.trim()
+  if (tail) {
+    for (const line of tail.split("\n")) {
+      const t = line.trim()
+      if (t) dispatchSseBlock(t)
     }
   }
 }

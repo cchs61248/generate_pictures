@@ -199,6 +199,9 @@ export default function App() {
   const [pendingToolSession, setPendingToolSession] = useState<ChatSession | null>(
     () => boot.pendingToolSession,
   )
+  const pendingToolSessionRef = useRef<ChatSession | null>(pendingToolSession)
+  pendingToolSessionRef.current = pendingToolSession
+
   const composerBySessionRef = useRef<Record<string, SessionComposerState>>({})
 
   const persistComposerState = useCallback(
@@ -270,11 +273,16 @@ export default function App() {
     }
   }, [sessions])
 
+  const restoreComposerStateRef = useRef(restoreComposerState)
+  restoreComposerStateRef.current = restoreComposerState
+
   useEffect(() => {
     if (!activeId) return
-    restoreComposerState(activeId)
+    // 僅在切換對話時還原輸入區。若依賴 restoreComposerState（隨 sessions 變化），上傳成功後
+    // patchActiveSession 會觸發此 effect，此時 composer ref 可能尚未寫入，會誤清空預覽。
+    restoreComposerStateRef.current(activeId)
     setThreadReferenceMissing(false)
-  }, [activeId, restoreComposerState])
+  }, [activeId])
 
   const setSessions = useCallback(
     (updater: ChatSession[] | ((prev: ChatSession[]) => ChatSession[])) => {
@@ -310,8 +318,17 @@ export default function App() {
             (s) => !deletedIdsRef.current.includes(s.id),
           )
           if (!remoteSessions.length) return prev
-          const activeOk = remoteSessions.some((s) => s.id === remote.activeId)
           sessionVersionRef.current = remote.version
+          // 若使用者已開啟「尚未 commit」的暫存對話，不要用遠端 activeId 覆蓋
+          const pend = pendingToolSessionRef.current
+          if (
+            pend &&
+            prev.activeId === pend.id &&
+            !remoteSessions.some((s) => s.id === prev.activeId)
+          ) {
+            return { sessions: remoteSessions, activeId: prev.activeId }
+          }
+          const activeOk = remoteSessions.some((s) => s.id === remote.activeId)
           return {
             sessions: remoteSessions,
             activeId: activeOk ? remote.activeId : remoteSessions[0].id,
@@ -337,6 +354,7 @@ export default function App() {
     const localActiveId = activeId
 
     void (async () => {
+      const localPending = pendingToolSessionRef.current
       // 最多重試 3 次，避免雙瀏覽器無限 409 循環
       for (let attempt = 0; attempt < 3; attempt++) {
         try {
@@ -397,12 +415,18 @@ export default function App() {
             if (!remoteMap.has(id)) mergedSessions.push(local)
           }
 
-          // 決定 activeId
+          // 決定 activeId（暫存對話不在 mergedSessions 內，必須保留）
+          const pendingIsActive =
+            localPending &&
+            localPending.id === localActiveId &&
+            !mergedSessions.some((s) => s.id === localActiveId)
           const mergedActiveId = mergedSessions.some((s) => s.id === localActiveId)
             ? localActiveId
-            : mergedSessions.some((s) => s.id === remote.activeId)
-              ? remote.activeId
-              : mergedSessions[0]?.id ?? localActiveId
+            : pendingIsActive
+              ? localActiveId
+              : mergedSessions.some((s) => s.id === remote.activeId)
+                ? remote.activeId
+                : mergedSessions[0]?.id ?? localActiveId
 
           setBoth({ sessions: mergedSessions, activeId: mergedActiveId })
           return
@@ -856,6 +880,12 @@ export default function App() {
                   error: true,
                 },
               ])
+              patchSession(sessionId, (s) => ({
+                ...s,
+                isRunning: false,
+                streamPrimed: false,
+                updatedAt: Date.now(),
+              }))
             }
           },
           aborter.signal,

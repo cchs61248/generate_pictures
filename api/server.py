@@ -650,7 +650,8 @@ async def chat_image_thread(payload: dict, request: Request):
 
                 result_text = ""
                 result_image_bytes: bytes | None = None
-                for part in response.parts:
+                parts_iter = getattr(response, "parts", None) or []
+                for part in parts_iter:
                     if hasattr(part, "text") and part.text:
                         result_text += part.text
                     elif hasattr(part, "inline_data") and part.inline_data is not None:
