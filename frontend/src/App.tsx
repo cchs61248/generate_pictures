@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react"
+import { flushSync } from "react-dom"
 import {
   type ChatMessage,
   consumeImageThreadStream,
@@ -77,6 +78,31 @@ function insertChildSession(
     insertAt += 1
   }
   return [...prev.slice(0, insertAt), child, ...prev.slice(insertAt)]
+}
+
+/** 與 409 合併相同：兩邊都有的 id 取 updatedAt 較新者，僅本地有的 id 保留 */
+function mergeSessionLists(
+  localSessions: ChatSession[],
+  remoteSessions: ChatSession[],
+  tombstones: Set<string>,
+): ChatSession[] {
+  const remoteFiltered = remoteSessions.filter((s) => !tombstones.has(s.id))
+  const localFiltered = localSessions.filter((s) => !tombstones.has(s.id))
+  const remoteMap = new Map(remoteFiltered.map((s) => [s.id, s]))
+  const localMap = new Map(localFiltered.map((s) => [s.id, s]))
+  const merged: ChatSession[] = []
+  for (const [, remoteSess] of remoteMap) {
+    const local = localMap.get(remoteSess.id)
+    merged.push(
+      local && (local.updatedAt ?? 0) >= (remoteSess.updatedAt ?? 0)
+        ? local
+        : remoteSess,
+    )
+  }
+  for (const [id, local] of localMap) {
+    if (!remoteMap.has(id)) merged.push(local)
+  }
+  return merged
 }
 
 type SessionComposerState = {
@@ -319,6 +345,12 @@ export default function App() {
           )
           if (!remoteSessions.length) return prev
           sessionVersionRef.current = remote.version
+          const tombstones = new Set(deletedIdsRef.current)
+          const mergedSessions = mergeSessionLists(
+            prev.sessions,
+            remoteSessions,
+            tombstones,
+          )
           // 若使用者已開啟「尚未 commit」的暫存對話，不要用遠端 activeId 覆蓋
           const pend = pendingToolSessionRef.current
           if (
@@ -326,12 +358,17 @@ export default function App() {
             prev.activeId === pend.id &&
             !remoteSessions.some((s) => s.id === prev.activeId)
           ) {
-            return { sessions: remoteSessions, activeId: prev.activeId }
+            return { sessions: mergedSessions, activeId: prev.activeId }
           }
-          const activeOk = remoteSessions.some((s) => s.id === remote.activeId)
+          const activeOk = mergedSessions.some((s) => s.id === prev.activeId)
+          const remoteActiveOk = mergedSessions.some((s) => s.id === remote.activeId)
           return {
-            sessions: remoteSessions,
-            activeId: activeOk ? remote.activeId : remoteSessions[0].id,
+            sessions: mergedSessions,
+            activeId: activeOk
+              ? prev.activeId
+              : remoteActiveOk
+                ? remote.activeId
+                : mergedSessions[0]?.id ?? prev.activeId,
           }
         })
       } catch {
@@ -395,25 +432,11 @@ export default function App() {
           const remoteSessions = (remote.sessions as ChatSession[]).filter(
             (s) => !tombstones.has(s.id),
           )
-          const remoteMap = new Map(remoteSessions.map((s) => [s.id, s]))
-          const localMap  = new Map(
-            localSessions.filter((s) => !tombstones.has(s.id)).map((s) => [s.id, s]),
+          const mergedSessions = mergeSessionLists(
+            localSessions,
+            remoteSessions,
+            tombstones,
           )
-
-          // 合併：兩邊都有的 session 以 updatedAt 較新者為準
-          const mergedSessions: ChatSession[] = []
-          for (const [id, remoteSess] of remoteMap) {
-            const local = localMap.get(id)
-            mergedSessions.push(
-              local && (local.updatedAt ?? 0) >= (remoteSess.updatedAt ?? 0)
-                ? local
-                : remoteSess,
-            )
-          }
-          // 僅本地有的（本地新增，遠端還沒收到）
-          for (const [id, local] of localMap) {
-            if (!remoteMap.has(id)) mergedSessions.push(local)
-          }
 
           // 決定 activeId（暫存對話不在 mergedSessions 內，必須保留）
           const pendingIsActive =
@@ -1177,9 +1200,11 @@ export default function App() {
       )
       if (existingThread) {
         setMainView("chat")
-        flushMessagesScroll()
-        setPendingToolSession(null)
-        setActiveIdOnly(existingThread.id)
+        flushSync(() => {
+          flushMessagesScroll()
+          setPendingToolSession(null)
+          setActiveIdOnly(existingThread.id)
+        })
         return
       }
 
@@ -1192,11 +1217,28 @@ export default function App() {
         threadSourceKey: sourceKey,
       }
       setMainView("chat")
-      flushMessagesScroll()
-      setPendingToolSession(null)
-      setSessions((prev) => insertChildSession(prev, parentId, threadSession))
-      setActiveIdOnly(threadSession.id)
-      setInputText("")
+      // 同步提交：避免 (1) 暫存主對話先被清掉導致 activeId 找不到 session
+      // (2) flushMessagesScroll 的 setSessions 與切換對話拆成兩次 commit
+      flushSync(() => {
+        flushMessagesScroll()
+        setBoth((prev) => {
+          let nextSessions = prev.sessions
+          const pend = pendingToolSessionRef.current
+          if (
+            pend &&
+            pend.id === parentId &&
+            !nextSessions.some((s) => s.id === parentId)
+          ) {
+            nextSessions = [pend, ...nextSessions]
+          }
+          return {
+            sessions: insertChildSession(nextSessions, parentId, threadSession),
+            activeId: threadSession.id,
+          }
+        })
+        setPendingToolSession(null)
+        setInputText("")
+      })
 
       try {
         const filename = pictureFilenameFromImageUrl(imageUrl)
@@ -1244,7 +1286,7 @@ export default function App() {
       persistComposerState,
       sessions,
       setActiveIdOnly,
-      setSessions,
+      setBoth,
     ],
   )
 
@@ -1294,9 +1336,11 @@ export default function App() {
               <h1 className="app-title">
                 {mainView === "settings"
                   ? "設定與說明"
-                  : activeSession?.toolId
-                    ? (getToolById(activeSession.toolId)?.chatTitle ?? "AI 助手")
-                    : "AI 電商圖文助手"}
+                  : activeSession?.parentId
+                    ? activeSession.title
+                    : activeSession?.toolId
+                      ? (getToolById(activeSession.toolId)?.chatTitle ?? "AI 助手")
+                      : "AI 電商圖文助手"}
               </h1>
               <p className="app-sub">API：{baseUrl}</p>
             </div>
@@ -1322,6 +1366,7 @@ export default function App() {
                   streaming={activeStreaming}
                   streamPrimed={activeStreamPrimed}
                   toolId={activeSession?.toolId}
+                  imageThreadLocked={imageThreadLocked}
                   onOpenImageThread={
                     activeSession?.parentId ? undefined : handleOpenImageThread
                   }

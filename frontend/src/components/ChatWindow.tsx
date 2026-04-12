@@ -24,6 +24,8 @@ type Props = {
   streamPrimed: boolean
   /** 此對話所屬的工具 ID */
   toolId?: string
+  /** 圖片子討論串：避免在訊息尚未寫入前顯示與主流程相同的工具空白頁 */
+  imageThreadLocked?: boolean
   onOpenImageThread?: (
     imageUrl: string,
     bubbleTitle: string,
@@ -41,6 +43,7 @@ export function ChatWindow({
   streaming,
   streamPrimed,
   toolId,
+  imageThreadLocked = false,
   onOpenImageThread,
 }: Props) {
   const bottomRef = useRef<HTMLDivElement>(null)
@@ -139,6 +142,14 @@ export function ChatWindow({
       >
         <div className="chat-content-inner">
           {messages.length === 0 && (() => {
+            if (imageThreadLocked) {
+              return (
+                <div className="chat-empty chat-empty--thread">
+                  <p className="chat-empty-title">圖片討論串</p>
+                  <p className="chat-empty-hint">正在載入圖片與討論串…</p>
+                </div>
+              )
+            }
             const tool = toolId ? getToolById(toolId) : undefined
             return (
               <div className="chat-empty">
