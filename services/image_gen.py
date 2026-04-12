@@ -4,7 +4,7 @@ import time
 
 from google.genai import types
 
-from core.config import get_image_model
+from core.config import get_image_model, get_image_output_size
 
 
 def is_transient_google_api_error(err_str: str) -> bool:
@@ -42,7 +42,7 @@ def generate_image_with_retry(
                     response_modalities=["IMAGE"],
                     image_config=types.ImageConfig(
                         aspect_ratio="1:1",
-                        image_size="512",
+                        image_size=get_image_output_size(),
                     ),
                 ),
             )

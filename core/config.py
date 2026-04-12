@@ -54,6 +54,14 @@ def get_image_model() -> str:
     return raw
 
 
+def get_image_output_size() -> str:
+    """IMAGE_OUTPUT_SIZE：Gemini 產圖像素等級，僅支援 1K / 2K / 4K（預設 1K）。較高解析有助筆畫較多的中文。"""
+    raw = (os.environ.get("IMAGE_OUTPUT_SIZE") or "1K").strip().upper()
+    if raw in ("1K", "2K", "4K"):
+        return raw
+    return "1K"
+
+
 # 與 parse_config、web_search、Gemini 用戶端等讀取的變數對齊；順序即寫入 .env 的順序。
 MANAGED_ENV_VARS: tuple[ManagedEnvVar, ...] = (
     ManagedEnvVar(
@@ -87,6 +95,10 @@ MANAGED_ENV_VARS: tuple[ManagedEnvVar, ...] = (
     ManagedEnvVar(
         "IMAGE_MODEL",
         "階段三以 API 產圖時使用的圖像模型。儲存值為官方 model 代碼；介面以下拉顯示（如 Nano Banana 2）。",
+    ),
+    ManagedEnvVar(
+        "IMAGE_OUTPUT_SIZE",
+        "API 產圖輸出尺寸：1K、2K 或 4K（預設 1K）。含大量中文時可試 2K 以減少字元變形。",
     ),
     ManagedEnvVar(
         "GEMINI_COOKIE_1PSID",

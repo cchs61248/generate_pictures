@@ -11,13 +11,16 @@ def build_safe_name(main_name: str) -> str:
 
 def compose_image_prompt(style_prompt: str, item: dict) -> str:
     copy_block = item["copy"]
-    tags_str = "、".join(copy_block["tags"])
+    tags = copy_block["tags"]
+    tags_quoted = " ".join(f"《{t}》" for t in tags)
     return f"""{style_prompt}
 
 ### {item["main"]}
 - scene：{item["scene"]}
-- headline：{copy_block["headline"]}
-- subline：{copy_block["subline"]}
-- tags：{tags_str}
 - specs：{item["specs"]}
+
+#### 必須顯示的文字（請逐字繪製於圖中）
+- 主標：《{copy_block["headline"]}》
+- 副標：《{copy_block["subline"]}》
+- 標籤（可分行或橫排，每則須完整）：{tags_quoted}
 """
