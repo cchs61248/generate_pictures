@@ -9,7 +9,7 @@ if hasattr(sys.stderr, "reconfigure"):
     sys.stderr.reconfigure(encoding="utf-8")
 
 from core.config import parse_config, sync_managed_env_from_dotenv
-from core.pipeline import run_pipeline
+from api.routers.tools.ecommerce_image.pipeline import run_pipeline
 
 
 def parse_args() -> argparse.Namespace:

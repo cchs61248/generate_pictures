@@ -17,8 +17,8 @@ from api.deps import (
     sse_streaming_response,
 )
 from core.config import parse_config, sync_managed_env_from_dotenv
-from core.pipeline import run_pipeline
 from core.progress import ProgressBus
+from api.routers.tools.ecommerce_image.pipeline import run_pipeline
 
 router = APIRouter(tags=["ecommerce-image"])
 

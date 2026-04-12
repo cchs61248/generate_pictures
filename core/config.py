@@ -111,19 +111,6 @@ ENV_VARS_HIDDEN_FROM_SETTINGS_UI: frozenset[str] = frozenset(
 )
 
 
-EXPECTED_MAINS = [
-    "P1 首圖 CTR核心 Prompt",
-    "P2 痛點 Pain Point Prompt",
-    "P3 解決 Solution Prompt",
-    "P4 場景 Context A Prompt",
-    "P5 場景 Context B Prompt",
-    "P6 細節 Close-up Prompt",
-    "P7 比較 Comparison Prompt",
-    "P8 延伸 Feature Prompt",
-    "P9 規格 Specs Prompt",
-]
-
-
 @dataclass
 class AppConfig:
     project_root: str
