@@ -1,4 +1,10 @@
-import { useCallback, useEffect, useState } from "react"
+import {
+  useCallback,
+  useEffect,
+  useLayoutEffect,
+  useState,
+  type RefObject,
+} from "react"
 import {
   ENV_KEYS_HIDDEN_FROM_SETTINGS_UI,
   type EnvVariableRow,
@@ -10,6 +16,9 @@ import {
 
 type Props = {
   baseUrl: string
+  /** 設定頁外層滾動容器（app-main--settings），用於還原垂直捲動 */
+  scrollContainerRef?: RefObject<HTMLElement | null>
+  savedMainScrollTop?: number
 }
 
 const GEMINI_BACKEND_OPTIONS = ["apikey", "hybrid"] as const
@@ -45,7 +54,11 @@ function modelSelectOptions(
   return choices
 }
 
-export function SettingsPage({ baseUrl }: Props) {
+export function SettingsPage({
+  baseUrl,
+  scrollContainerRef,
+  savedMainScrollTop,
+}: Props) {
   const [rows, setRows] = useState<EnvVariableRow[]>([])
   const [modelChoices, setModelChoices] = useState<
     Record<string, ModelChoiceOption[]>
@@ -84,6 +97,20 @@ export function SettingsPage({ baseUrl }: Props) {
   useEffect(() => {
     void load()
   }, [load])
+
+  useLayoutEffect(() => {
+    if (loading) return
+    const el = scrollContainerRef?.current
+    if (!el || savedMainScrollTop === undefined) return
+    const apply = () => {
+      const inner = scrollContainerRef?.current
+      if (!inner) return
+      const max = Math.max(0, inner.scrollHeight - inner.clientHeight)
+      inner.scrollTop = Math.min(savedMainScrollTop, max)
+    }
+    apply()
+    requestAnimationFrame(apply)
+  }, [loading, rows, scrollContainerRef, savedMainScrollTop])
 
   const setValue = (key: string, value: string) => {
     setRows((prev) =>

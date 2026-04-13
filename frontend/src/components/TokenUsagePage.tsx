@@ -1,8 +1,21 @@
-import { useCallback, useEffect, useState } from "react"
+import {
+  useCallback,
+  useEffect,
+  useLayoutEffect,
+  useRef,
+  useState,
+  type MutableRefObject,
+  type RefObject,
+} from "react"
 import { fetchTokenUsage, FALLBACK_MODEL_CHOICES, type TokenUsageRecord } from "../api"
 
 type Props = {
   baseUrl: string
+  scrollContainerRef?: RefObject<HTMLElement | null>
+  savedMainScrollTop?: number
+  savedTableScrollX?: { summary?: number; detail?: number }
+  onTableScrollXPersist?: (which: "summary" | "detail", scrollLeft: number) => void
+  tableScrollFlushRef?: MutableRefObject<() => void>
 }
 
 function todayStr(): string {
@@ -136,12 +149,29 @@ function buildSummary(records: TokenUsageRecord[]): ModelSummary[] {
   return Array.from(map.values()).sort((a, b) => a.model.localeCompare(b.model))
 }
 
-export function TokenUsagePage({ baseUrl }: Props) {
+export function TokenUsagePage({
+  baseUrl,
+  scrollContainerRef,
+  savedMainScrollTop,
+  savedTableScrollX,
+  onTableScrollXPersist,
+  tableScrollFlushRef,
+}: Props) {
   const [start, setStart] = useState(firstDayOfMonthStr)
   const [end, setEnd] = useState(todayStr)
   const [records, setRecords] = useState<TokenUsageRecord[]>([])
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  const summaryTableWrapRef = useRef<HTMLDivElement>(null)
+  const detailTableWrapRef = useRef<HTMLDivElement>(null)
+  const lastSummaryScrollXRef = useRef(0)
+  const lastDetailScrollXRef = useRef(0)
+  const summaryTableScrollTimerRef = useRef<ReturnType<typeof setTimeout> | null>(
+    null,
+  )
+  const detailTableScrollTimerRef = useRef<ReturnType<typeof setTimeout> | null>(
+    null,
+  )
 
   const load = useCallback(async () => {
     setLoading(true)
@@ -159,6 +189,90 @@ export function TokenUsagePage({ baseUrl }: Props) {
   useEffect(() => {
     void load()
   }, [load])
+
+  useLayoutEffect(() => {
+    if (loading) return
+    const el = scrollContainerRef?.current
+    if (!el || savedMainScrollTop === undefined) return
+    const apply = () => {
+      const inner = scrollContainerRef?.current
+      if (!inner) return
+      const max = Math.max(0, inner.scrollHeight - inner.clientHeight)
+      inner.scrollTop = Math.min(savedMainScrollTop, max)
+    }
+    apply()
+    requestAnimationFrame(apply)
+  }, [loading, records, scrollContainerRef, savedMainScrollTop])
+
+  useLayoutEffect(() => {
+    if (loading) return
+    const s = summaryTableWrapRef.current
+    if (s && savedTableScrollX?.summary !== undefined) {
+      const apply = () => {
+        const inner = summaryTableWrapRef.current
+        if (!inner) return
+        const max = Math.max(0, inner.scrollWidth - inner.clientWidth)
+        inner.scrollLeft = Math.min(savedTableScrollX.summary!, max)
+        lastSummaryScrollXRef.current = inner.scrollLeft
+      }
+      apply()
+      requestAnimationFrame(apply)
+    }
+    const d = detailTableWrapRef.current
+    if (d && savedTableScrollX?.detail !== undefined) {
+      const apply = () => {
+        const inner = detailTableWrapRef.current
+        if (!inner) return
+        const max = Math.max(0, inner.scrollWidth - inner.clientWidth)
+        inner.scrollLeft = Math.min(savedTableScrollX.detail!, max)
+        lastDetailScrollXRef.current = inner.scrollLeft
+      }
+      apply()
+      requestAnimationFrame(apply)
+    }
+  }, [loading, records, savedTableScrollX])
+
+  const scheduleTableScrollXPersist = useCallback(
+    (which: "summary" | "detail", scrollLeft: number) => {
+      if (which === "summary") {
+        if (summaryTableScrollTimerRef.current) {
+          clearTimeout(summaryTableScrollTimerRef.current)
+        }
+        summaryTableScrollTimerRef.current = setTimeout(() => {
+          summaryTableScrollTimerRef.current = null
+          onTableScrollXPersist?.(which, scrollLeft)
+        }, 400)
+      } else {
+        if (detailTableScrollTimerRef.current) {
+          clearTimeout(detailTableScrollTimerRef.current)
+        }
+        detailTableScrollTimerRef.current = setTimeout(() => {
+          detailTableScrollTimerRef.current = null
+          onTableScrollXPersist?.(which, scrollLeft)
+        }, 400)
+      }
+    },
+    [onTableScrollXPersist],
+  )
+
+  useLayoutEffect(() => {
+    if (!tableScrollFlushRef || !onTableScrollXPersist) return
+    tableScrollFlushRef.current = () => {
+      if (summaryTableScrollTimerRef.current) {
+        clearTimeout(summaryTableScrollTimerRef.current)
+        summaryTableScrollTimerRef.current = null
+      }
+      if (detailTableScrollTimerRef.current) {
+        clearTimeout(detailTableScrollTimerRef.current)
+        detailTableScrollTimerRef.current = null
+      }
+      onTableScrollXPersist("summary", lastSummaryScrollXRef.current)
+      onTableScrollXPersist("detail", lastDetailScrollXRef.current)
+    }
+    return () => {
+      tableScrollFlushRef.current = () => {}
+    }
+  }, [onTableScrollXPersist, tableScrollFlushRef])
 
   const summary = buildSummary(records)
   const totalInput = records.reduce((s, r) => s + r.input_tokens, 0)
@@ -227,7 +341,16 @@ export function TokenUsagePage({ baseUrl }: Props) {
               {loading ? "載入中…" : "此區間無資料"}
             </p>
           ) : (
-            <div className="token-table-wrap">
+            <div
+              ref={summaryTableWrapRef}
+              className="token-table-wrap"
+              onScroll={() => {
+                const el = summaryTableWrapRef.current
+                if (!el) return
+                lastSummaryScrollXRef.current = el.scrollLeft
+                scheduleTableScrollXPersist("summary", el.scrollLeft)
+              }}
+            >
               <table className="token-table">
                 <thead>
                   <tr>
@@ -274,7 +397,16 @@ export function TokenUsagePage({ baseUrl }: Props) {
               {loading ? "載入中…" : "此區間無資料"}
             </p>
           ) : (
-            <div className="token-table-wrap">
+            <div
+              ref={detailTableWrapRef}
+              className="token-table-wrap"
+              onScroll={() => {
+                const el = detailTableWrapRef.current
+                if (!el) return
+                lastDetailScrollXRef.current = el.scrollLeft
+                scheduleTableScrollXPersist("detail", el.scrollLeft)
+              }}
+            >
               <table className="token-table">
                 <thead>
                   <tr>

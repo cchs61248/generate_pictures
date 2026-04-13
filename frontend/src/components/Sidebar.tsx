@@ -1,4 +1,11 @@
-import { useEffect, useMemo, useRef, useState } from "react"
+import {
+  type MutableRefObject,
+  useEffect,
+  useLayoutEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react"
 import type { ChatSession } from "../types/chatSession"
 import { TOOLS } from "../tools"
 
@@ -15,6 +22,15 @@ type Props = {
   settingsActive?: boolean
   onOpenTokenUsage: () => void
   tokenUsageActive?: boolean
+  /** 僅在聊天主畫面時標示目前對話；設定／Token 用量頁不強調任何 session */
+  sessionHighlightActive?: boolean
+  /** 對話列表（.sidebar-list）垂直捲動還原與持久化 */
+  listScrollTop?: number
+  /** 捲動時 debounce 寫入（與聊天訊息區相同） */
+  onListScrollPersist?: (scrollTop: number) => void
+  /** 切換頁面前／離開頁面時立即寫入 */
+  onListScrollPersistNow?: (scrollTop: number) => void
+  listScrollFlushRef?: MutableRefObject<() => void>
 }
 
 export function Sidebar({
@@ -29,6 +45,11 @@ export function Sidebar({
   settingsActive = false,
   onOpenTokenUsage,
   tokenUsageActive = false,
+  sessionHighlightActive = true,
+  listScrollTop,
+  onListScrollPersist,
+  onListScrollPersistNow,
+  listScrollFlushRef,
 }: Props) {
   const [query, setQuery] = useState("")
   const [menuOpenId, setMenuOpenId] = useState<string | null>(null)
@@ -36,6 +57,8 @@ export function Sidebar({
   const [renameDraft, setRenameDraft] = useState("")
   const renameInputRef = useRef<HTMLInputElement>(null)
   const skipRenameBlurRef = useRef(false)
+  const sidebarListRef = useRef<HTMLUListElement>(null)
+  const lastListScrollTopRef = useRef(0)
   const [toolsExpanded, setToolsExpanded] = useState(true)
   const [expandedParents, setExpandedParents] = useState<Record<string, boolean>>({})
 
@@ -82,6 +105,32 @@ export function Sidebar({
       renameInputRef.current.select()
     }
   }, [renamingId])
+
+  useLayoutEffect(() => {
+    if (!listScrollFlushRef || !onListScrollPersistNow) return
+    listScrollFlushRef.current = () => {
+      onListScrollPersistNow(lastListScrollTopRef.current)
+    }
+    return () => {
+      onListScrollPersistNow(lastListScrollTopRef.current)
+      listScrollFlushRef.current = () => {}
+    }
+  }, [listScrollFlushRef, onListScrollPersistNow])
+
+  useLayoutEffect(() => {
+    const el = sidebarListRef.current
+    if (!el) return
+    if (listScrollTop === undefined) return
+    const apply = () => {
+      const inner = sidebarListRef.current
+      if (!inner) return
+      const max = Math.max(0, inner.scrollHeight - inner.clientHeight)
+      inner.scrollTop = Math.min(listScrollTop, max)
+      lastListScrollTopRef.current = inner.scrollTop
+    }
+    apply()
+    requestAnimationFrame(apply)
+  }, [listScrollTop, filteredRoots.length])
 
   const handleSelect = (id: string) => {
     if (renamingId) return
@@ -179,11 +228,20 @@ export function Sidebar({
         </div>
 
         <p className="sidebar-section-label">對話</p>
-        <ul className="sidebar-list">
+        <ul
+          ref={sidebarListRef}
+          className="sidebar-list"
+          onScroll={() => {
+            const el = sidebarListRef.current
+            if (!el || !onListScrollPersist) return
+            lastListScrollTopRef.current = el.scrollTop
+            onListScrollPersist(el.scrollTop)
+          }}
+        >
         {filteredRoots.map((s) => {
           const children = childMap[s.id] ?? []
           const rootExpanded = expandedParents[s.id] ?? true
-          const active = s.id === activeId
+          const active = sessionHighlightActive && s.id === activeId
           const isRenaming = renamingId === s.id
 
           if (isRenaming) {
@@ -305,7 +363,8 @@ export function Sidebar({
               {children.length > 0 && rootExpanded ? (
                 <ul className="sidebar-child-list">
                   {children.map((child) => {
-                    const childActive = child.id === activeId
+                    const childActive =
+                      sessionHighlightActive && child.id === activeId
                     return (
                       <li key={child.id} className="sidebar-item sidebar-item--child">
                         <span className="sidebar-child-branch" aria-hidden />

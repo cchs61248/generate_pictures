@@ -8,6 +8,22 @@ import type { ChatMessage } from "../api"
 import { getToolById } from "../tools"
 import { MessageBubble } from "./Message"
 
+/** 與下方「新 assistant 內容」偵測邏輯一致；用於還原捲動後同步 ref，避免誤觸捲到底 */
+function assistantMessagesSignature(messages: ChatMessage[]): string {
+  return messages
+    .filter((m) => m.role === "assistant")
+    .map((m) =>
+      JSON.stringify({
+        id: m.id,
+        text: m.text ?? "",
+        lines: m.collapsible?.lines.length ?? 0,
+        images: m.generatedImages?.length ?? 0,
+        error: Boolean(m.error),
+      }),
+    )
+    .join("|")
+}
+
 type Props = {
   sessionId: string
   /** 若未曾捲動過可為 undefined，切換回來時改為捲到底 */
@@ -71,6 +87,8 @@ export function ChatWindow({
     if (!el) return
     if (prevSessionIdRef.current === sessionId) return
     prevSessionIdRef.current = sessionId
+    // 切換／首次掛載還原捲動後，必須對齊簽名；否則下一個 useEffect 會以「從空字串變成有內容」為由捲到底（覆蓋重新整理後的位置）
+    prevAiSignatureRef.current = assistantMessagesSignature(messages)
 
     const apply = () => {
       const inner = messagesElRef.current
@@ -89,21 +107,10 @@ export function ChatWindow({
     }
     apply()
     requestAnimationFrame(apply)
-  }, [sessionId, savedScrollTop])
+  }, [sessionId, savedScrollTop, messages])
 
   useEffect(() => {
-    const aiSignature = messages
-      .filter((m) => m.role === "assistant")
-      .map((m) =>
-        JSON.stringify({
-          id: m.id,
-          text: m.text ?? "",
-          lines: m.collapsible?.lines.length ?? 0,
-          images: m.generatedImages?.length ?? 0,
-          error: Boolean(m.error),
-        }),
-      )
-      .join("|")
+    const aiSignature = assistantMessagesSignature(messages)
 
     if (prevSessionIdRef.current !== sessionId) {
       prevAiSignatureRef.current = aiSignature
@@ -111,13 +118,29 @@ export function ChatWindow({
     }
 
     const prev = prevAiSignatureRef.current
-    prevAiSignatureRef.current = aiSignature
     if (aiSignature === prev) return
 
+    // 訊息稍晚才掛上時，第一次 layout 可能尚無 assistant 簽名；此時應套用已儲存捲動，勿捲到底
+    if (
+      prev === "" &&
+      aiSignature !== "" &&
+      savedScrollTop !== undefined
+    ) {
+      prevAiSignatureRef.current = aiSignature
+      const el = messagesElRef.current
+      if (el) {
+        const max = Math.max(0, el.scrollHeight - el.clientHeight)
+        el.scrollTop = Math.min(savedScrollTop, max)
+        lastScrollTopRef.current = el.scrollTop
+      }
+      return
+    }
+
+    prevAiSignatureRef.current = aiSignature
     const el = messagesElRef.current
     if (!el) return
     bottomRef.current?.scrollIntoView({ behavior: "smooth" })
-  }, [messages, sessionId, streaming, streamPrimed])
+  }, [messages, sessionId, streaming, streamPrimed, savedScrollTop])
 
   const handleScroll = () => {
     const el = messagesElRef.current

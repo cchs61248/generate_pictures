@@ -1,4 +1,11 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react"
+import {
+  useCallback,
+  useEffect,
+  useLayoutEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react"
 import { flushSync } from "react-dom"
 import {
   type ChatMessage,
@@ -13,7 +20,14 @@ import {
   saveSessionState,
   uploadImage,
 } from "./api"
-import { loadPersistedState, savePersistedState } from "./chatStorage"
+import {
+  loadPersistedState,
+  normalizePendingSession,
+  resolvePersistedMainView,
+  savePersistedState,
+  type PersistedState,
+  type PersistedUiScroll,
+} from "./chatStorage"
 import { ChatWindow } from "./components/ChatWindow"
 import { InputBar } from "./components/InputBar"
 import { SettingsPage } from "./components/SettingsPage"
@@ -94,14 +108,22 @@ function mergeSessionLists(
   const merged: ChatSession[] = []
   for (const [, remoteSess] of remoteMap) {
     const local = localMap.get(remoteSess.id)
-    merged.push(
-      local && (local.updatedAt ?? 0) >= (remoteSess.updatedAt ?? 0)
-        ? local
-        : remoteSess,
-    )
+    if (!local) {
+      merged.push(remoteSess)
+      continue
+    }
+    const useLocalContent =
+      (local.updatedAt ?? 0) >= (remoteSess.updatedAt ?? 0)
+    const base = useLocalContent ? local : remoteSess
+    merged.push({
+      ...base,
+      // 訊息區捲動位置為本地 UI 狀態，與 updatedAt 無關；合併時優先保留任一端有紀錄者
+      messagesScrollTop:
+        local.messagesScrollTop ?? remoteSess.messagesScrollTop,
+    })
   }
-  for (const [id, local] of localMap) {
-    if (!remoteMap.has(id)) merged.push(local)
+  for (const [, local] of localMap) {
+    if (!remoteMap.has(local.id)) merged.push(local)
   }
   return merged
 }
@@ -137,36 +159,79 @@ function initialState(): {
   sessions: ChatSession[]
   activeId: string
   pendingToolSession: ChatSession | null
+  mainView: "chat" | "settings" | "token_usage"
 } {
   const persisted = loadPersistedState()
+  const mainView = resolvePersistedMainView(persisted)
+  const pending = persisted
+    ? normalizePendingSession(persisted.pendingToolSession)
+    : null
+
+  const pendingMatchesActive =
+    !!pending &&
+    pending.id === persisted?.activeId &&
+    !pending.parentId
+
   if (persisted?.sessions?.length) {
+    if (pendingMatchesActive) {
+      return {
+        sessions: persisted.sessions,
+        activeId: persisted.activeId,
+        pendingToolSession: pending,
+        mainView,
+      }
+    }
     const activeOk = persisted.sessions.some((s) => s.id === persisted.activeId)
     return {
       sessions: persisted.sessions,
       activeId: activeOk ? persisted.activeId : persisted.sessions[0].id,
       pendingToolSession: null,
+      mainView,
     }
   }
+
+  if (pendingMatchesActive && persisted) {
+    return {
+      sessions: [],
+      activeId: persisted.activeId,
+      pendingToolSession: pending,
+      mainView,
+    }
+  }
+
   const temp = createDefaultTemporaryToolSession()
-  return { sessions: [], activeId: temp.id, pendingToolSession: temp }
+  return { sessions: [], activeId: temp.id, pendingToolSession: temp, mainView }
 }
 
-function normalizeIncomingState(incoming: {
-  sessions: ChatSession[]
-  activeId: string
-}): {
+function normalizeIncomingState(incoming: PersistedState): {
   sessions: ChatSession[]
   activeId: string
   pendingToolSession: ChatSession | null
 } {
-  if (incoming.sessions.length === 0) {
+  const pending = normalizePendingSession(incoming.pendingToolSession)
+  const sessions = incoming.sessions
+  const activeId = incoming.activeId
+
+  const pendingMatchesActive =
+    !!pending &&
+    pending.id === activeId &&
+    !pending.parentId
+
+  if (pendingMatchesActive) {
+    if (sessions.length === 0) {
+      return { sessions: [], activeId, pendingToolSession: pending }
+    }
+    return { sessions, activeId, pendingToolSession: pending }
+  }
+
+  if (sessions.length === 0) {
     const temp = createDefaultTemporaryToolSession()
     return { sessions: [], activeId: temp.id, pendingToolSession: temp }
   }
-  const activeOk = incoming.sessions.some((s) => s.id === incoming.activeId)
+  const activeOk = sessions.some((s) => s.id === activeId)
   return {
-    sessions: incoming.sessions,
-    activeId: activeOk ? incoming.activeId : incoming.sessions[0].id,
+    sessions,
+    activeId: activeOk ? activeId : sessions[0].id,
     pendingToolSession: null,
   }
 }
@@ -215,16 +280,31 @@ export default function App() {
   const messagesScrollPersistTimerRef = useRef<ReturnType<
     typeof setTimeout
   > | null>(null)
+  const settingsMainRef = useRef<HTMLElement | null>(null)
+  const settingsMainScrollTimerRef = useRef<ReturnType<typeof setTimeout> | null>(
+    null,
+  )
+  const settingsMainScrollFlushRef = useRef<() => void>(() => {})
+  const sidebarListScrollTimerRef = useRef<ReturnType<typeof setTimeout> | null>(
+    null,
+  )
+  const sidebarListScrollFlushRef = useRef<() => void>(() => {})
+  const tokenTablesScrollFlushRef = useRef<() => void>(() => {})
   const [sidebarOpen, setSidebarOpen] = useState(() =>
     typeof window !== "undefined" ? window.innerWidth > 900 : true,
   )
-  const [mainView, setMainView] = useState<"chat" | "settings" | "token_usage">("chat")
+  const [mainView, setMainView] = useState<"chat" | "settings" | "token_usage">(
+    () => boot.mainView,
+  )
   /**
    * 點擊工具後建立的「暫存對話」，尚未加入 sessions。
    * 送出第一筆訊息時才正式 commit 進 sessions。
    */
   const [pendingToolSession, setPendingToolSession] = useState<ChatSession | null>(
     () => boot.pendingToolSession,
+  )
+  const [uiScroll, setUiScroll] = useState<PersistedUiScroll>(
+    () => loadPersistedState()?.uiScroll ?? {},
   )
   const pendingToolSessionRef = useRef<ChatSession | null>(pendingToolSession)
   pendingToolSessionRef.current = pendingToolSession
@@ -384,7 +464,13 @@ export default function App() {
   }, [baseUrl])
 
   useEffect(() => {
-    savePersistedState({ sessions, activeId })
+    savePersistedState({
+      sessions,
+      activeId,
+      mainView,
+      pendingToolSession,
+      uiScroll,
+    })
     if (!hydratedFromServer) return
 
     // 快照：避免 closure 過舊
@@ -457,7 +543,15 @@ export default function App() {
         }
       }
     })()
-  }, [activeId, baseUrl, hydratedFromServer, sessions])
+  }, [
+    activeId,
+    baseUrl,
+    hydratedFromServer,
+    mainView,
+    pendingToolSession,
+    sessions,
+    uiScroll,
+  ])
 
   const activeSession = useMemo(() => {
     if (pendingToolSession && pendingToolSession.id === activeId) {
@@ -533,6 +627,9 @@ export default function App() {
 
   const persistMessagesScroll = useCallback(
     (sessionId: string, scrollTop: number) => {
+      setPendingToolSession((p) =>
+        p && p.id === sessionId ? { ...p, messagesScrollTop: scrollTop } : p,
+      )
       setSessions((prev) =>
         prev.map((s) =>
           s.id === sessionId ? { ...s, messagesScrollTop: scrollTop } : s,
@@ -562,6 +659,98 @@ export default function App() {
     }
     messagesScrollFlushRef.current()
   }, [])
+
+  const scheduleSettingsMainScrollPersist = useCallback(() => {
+    if (settingsMainScrollTimerRef.current) {
+      clearTimeout(settingsMainScrollTimerRef.current)
+    }
+    settingsMainScrollTimerRef.current = setTimeout(() => {
+      settingsMainScrollTimerRef.current = null
+      const el = settingsMainRef.current
+      if (!el) return
+      if (mainView === "settings") {
+        setUiScroll((s) => ({ ...s, settingsMain: el.scrollTop }))
+      } else if (mainView === "token_usage") {
+        setUiScroll((s) => ({ ...s, tokenUsageMain: el.scrollTop }))
+      }
+    }, 400)
+  }, [mainView])
+
+  const flushSettingsMainScroll = useCallback(() => {
+    if (settingsMainScrollTimerRef.current) {
+      clearTimeout(settingsMainScrollTimerRef.current)
+      settingsMainScrollTimerRef.current = null
+    }
+    settingsMainScrollFlushRef.current()
+  }, [])
+
+  useLayoutEffect(() => {
+    settingsMainScrollFlushRef.current = () => {
+      const el = settingsMainRef.current
+      if (!el) return
+      if (mainView === "settings") {
+        setUiScroll((s) => ({ ...s, settingsMain: el.scrollTop }))
+      } else if (mainView === "token_usage") {
+        setUiScroll((s) => ({ ...s, tokenUsageMain: el.scrollTop }))
+      }
+    }
+  }, [mainView])
+
+  const scheduleSidebarListScrollPersist = useCallback((scrollTop: number) => {
+    if (sidebarListScrollTimerRef.current) {
+      clearTimeout(sidebarListScrollTimerRef.current)
+    }
+    sidebarListScrollTimerRef.current = setTimeout(() => {
+      sidebarListScrollTimerRef.current = null
+      setUiScroll((s) => ({ ...s, sidebarList: scrollTop }))
+    }, 400)
+  }, [])
+
+  const flushSidebarListScroll = useCallback(() => {
+    if (sidebarListScrollTimerRef.current) {
+      clearTimeout(sidebarListScrollTimerRef.current)
+      sidebarListScrollTimerRef.current = null
+    }
+    sidebarListScrollFlushRef.current()
+  }, [])
+
+  const persistSidebarListScrollNow = useCallback((scrollTop: number) => {
+    setUiScroll((s) => ({ ...s, sidebarList: scrollTop }))
+  }, [])
+
+  const persistTokenTableScrollX = useCallback(
+    (which: "summary" | "detail", scrollLeft: number) => {
+      setUiScroll((s) =>
+        which === "summary"
+          ? { ...s, tokenUsageSummaryTableX: scrollLeft }
+          : { ...s, tokenUsageDetailTableX: scrollLeft },
+      )
+    },
+    [],
+  )
+
+  /** 重新整理／關閉分頁前強制寫入捲動位置（避免 400ms debounce 尚未提交） */
+  useEffect(() => {
+    const onHidden = () => {
+      flushMessagesScroll()
+      flushSettingsMainScroll()
+      flushSidebarListScroll()
+      tokenTablesScrollFlushRef.current()
+    }
+    const onVisibilityChange = () => {
+      if (document.visibilityState === "hidden") onHidden()
+    }
+    window.addEventListener("pagehide", onHidden)
+    document.addEventListener("visibilitychange", onVisibilityChange)
+    return () => {
+      window.removeEventListener("pagehide", onHidden)
+      document.removeEventListener("visibilitychange", onVisibilityChange)
+    }
+  }, [
+    flushMessagesScroll,
+    flushSettingsMainScroll,
+    flushSidebarListScroll,
+  ])
 
   const patchActiveMessages = useCallback(
     (fn: (prev: ChatMessage[]) => ChatMessage[]) => {
@@ -595,11 +784,16 @@ export default function App() {
       if (!next) return
       const normalized = normalizeIncomingState(next)
       flushMessagesScroll()
+      flushSettingsMainScroll()
+      flushSidebarListScroll()
+      tokenTablesScrollFlushRef.current()
       setBoth({
         sessions: normalized.sessions,
         activeId: normalized.activeId,
       })
       setPendingToolSession(normalized.pendingToolSession)
+      setMainView(resolvePersistedMainView(next))
+      setUiScroll(next.uiScroll ?? {})
       composerBySessionRef.current = {}
       resetInputAndUpload()
     }
@@ -607,7 +801,7 @@ export default function App() {
     return () => {
       window.removeEventListener("storage", handleStorage)
     }
-  }, [flushMessagesScroll, resetInputAndUpload])
+  }, [flushMessagesScroll, flushSettingsMainScroll, resetInputAndUpload])
 
   const handleNewToolChat = useCallback(
     (toolId: string) => {
@@ -1315,6 +1509,11 @@ export default function App() {
           onOpenSettings={handleOpenSettings}
           tokenUsageActive={mainView === "token_usage"}
           onOpenTokenUsage={handleOpenTokenUsage}
+          sessionHighlightActive={mainView === "chat"}
+          listScrollTop={uiScroll.sidebarList}
+          onListScrollPersist={scheduleSidebarListScrollPersist}
+          onListScrollPersistNow={persistSidebarListScrollNow}
+          listScrollFlushRef={sidebarListScrollFlushRef}
           onNavigate={() => {
             if (typeof window !== "undefined" && window.matchMedia("(max-width: 900px)").matches) {
               setSidebarOpen(false)
@@ -1356,6 +1555,12 @@ export default function App() {
             </div>
           </header>
           <main
+            ref={settingsMainRef}
+            onScroll={
+              mainView === "settings" || mainView === "token_usage"
+                ? scheduleSettingsMainScrollPersist
+                : undefined
+            }
             className={
               mainView === "settings" || mainView === "token_usage"
                 ? "app-main app-main--settings"
@@ -1363,9 +1568,23 @@ export default function App() {
             }
           >
             {mainView === "settings" ? (
-              <SettingsPage baseUrl={baseUrl} />
+              <SettingsPage
+                baseUrl={baseUrl}
+                scrollContainerRef={settingsMainRef}
+                savedMainScrollTop={uiScroll.settingsMain}
+              />
             ) : mainView === "token_usage" ? (
-              <TokenUsagePage baseUrl={baseUrl} />
+              <TokenUsagePage
+                baseUrl={baseUrl}
+                scrollContainerRef={settingsMainRef}
+                savedMainScrollTop={uiScroll.tokenUsageMain}
+                savedTableScrollX={{
+                  summary: uiScroll.tokenUsageSummaryTableX,
+                  detail: uiScroll.tokenUsageDetailTableX,
+                }}
+                onTableScrollXPersist={persistTokenTableScrollX}
+                tableScrollFlushRef={tokenTablesScrollFlushRef}
+              />
             ) : (
               <>
                 <ChatWindow
