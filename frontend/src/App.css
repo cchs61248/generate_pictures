@@ -1761,3 +1761,49 @@
   color: #57bb70;
   font-weight: 700;
 }
+
+.token-pagination {
+  margin-top: 0.75rem;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.75rem;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.token-pagination-meta {
+  font-size: 0.8rem;
+  color: rgba(227, 227, 227, 0.58);
+}
+
+.token-pagination-actions {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.token-page-btn {
+  min-height: 34px;
+  padding: 0.35rem 0.7rem;
+  border-radius: 999px;
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  background: rgba(255, 255, 255, 0.04);
+  color: #e3e3e3;
+  font-size: 0.82rem;
+  cursor: pointer;
+}
+
+.token-page-btn:hover:not(:disabled) {
+  background: rgba(168, 199, 250, 0.18);
+  border-color: rgba(168, 199, 250, 0.45);
+}
+
+.token-page-btn:disabled {
+  opacity: 0.45;
+  cursor: default;
+}
+
+.token-page-indicator {
+  font-size: 0.8rem;
+  color: rgba(227, 227, 227, 0.7);
+}

@@ -2,6 +2,7 @@ import {
   useCallback,
   useEffect,
   useLayoutEffect,
+  useMemo,
   useRef,
   useState,
   type MutableRefObject,
@@ -124,6 +125,16 @@ type ModelSummary = {
   cost: number | null
 }
 
+const PAGE_SIZE = 10
+
+function totalPages(totalItems: number, pageSize: number): number {
+  return Math.max(1, Math.ceil(totalItems / pageSize))
+}
+
+function pageSliceStart(page: number, pageSize: number): number {
+  return (page - 1) * pageSize
+}
+
 function buildSummary(records: TokenUsageRecord[]): ModelSummary[] {
   const map = new Map<string, ModelSummary>()
   for (const r of records) {
@@ -160,6 +171,8 @@ export function TokenUsagePage({
   const [start, setStart] = useState(firstDayOfMonthStr)
   const [end, setEnd] = useState(todayStr)
   const [records, setRecords] = useState<TokenUsageRecord[]>([])
+  const [summaryPage, setSummaryPage] = useState(1)
+  const [detailPage, setDetailPage] = useState(1)
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const summaryTableWrapRef = useRef<HTMLDivElement>(null)
@@ -179,6 +192,8 @@ export function TokenUsagePage({
     try {
       const data = await fetchTokenUsage(baseUrl, start, end)
       setRecords(data)
+      setSummaryPage(1)
+      setDetailPage(1)
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e))
     } finally {
@@ -274,7 +289,18 @@ export function TokenUsagePage({
     }
   }, [onTableScrollXPersist, tableScrollFlushRef])
 
-  const summary = buildSummary(records)
+  const summary = useMemo(() => buildSummary(records), [records])
+  const summaryPageCount = totalPages(summary.length, PAGE_SIZE)
+  const safeSummaryPage = Math.min(summaryPage, summaryPageCount)
+  const summaryPageStart = pageSliceStart(safeSummaryPage, PAGE_SIZE)
+  const summaryPageRows = summary.slice(summaryPageStart, summaryPageStart + PAGE_SIZE)
+
+  const reversedRecords = useMemo(() => [...records].reverse(), [records])
+  const detailPageCount = totalPages(reversedRecords.length, PAGE_SIZE)
+  const safeDetailPage = Math.min(detailPage, detailPageCount)
+  const detailPageStart = pageSliceStart(safeDetailPage, PAGE_SIZE)
+  const detailPageRows = reversedRecords.slice(detailPageStart, detailPageStart + PAGE_SIZE)
+
   const totalInput = records.reduce((s, r) => s + r.input_tokens, 0)
   const totalOutput = records.reduce((s, r) => s + r.output_tokens, 0)
   const totalCost = summary.reduce<number | null>((acc, s) => {
@@ -341,51 +367,80 @@ export function TokenUsagePage({
               {loading ? "載入中…" : "此區間無資料"}
             </p>
           ) : (
-            <div
-              ref={summaryTableWrapRef}
-              className="token-table-wrap"
-              onScroll={() => {
-                const el = summaryTableWrapRef.current
-                if (!el) return
-                lastSummaryScrollXRef.current = el.scrollLeft
-                scheduleTableScrollXPersist("summary", el.scrollLeft)
-              }}
-            >
-              <table className="token-table">
-                <thead>
-                  <tr>
-                    <th>模型</th>
-                    <th className="token-num">呼叫次數</th>
-                    <th className="token-num">Input Token</th>
-                    <th className="token-num">Output Token</th>
-                    <th className="token-num">Total Token</th>
-                    <th className="token-num">估計費用 (USD)</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {summary.map((s) => (
-                    <tr key={s.model}>
-                      <td className="token-model" title={s.model}>{modelLabel(s.model)}</td>
-                      <td className="token-num">{formatNum(s.count)}</td>
-                      <td className="token-num">{formatNum(s.input_tokens)}</td>
-                      <td className="token-num">{formatNum(s.output_tokens)}</td>
-                      <td className="token-num">{formatNum(s.input_tokens + s.output_tokens)}</td>
-                      <td className="token-num token-cost">{formatCost(s.cost)}</td>
+            <>
+              <div
+                ref={summaryTableWrapRef}
+                className="token-table-wrap"
+                onScroll={() => {
+                  const el = summaryTableWrapRef.current
+                  if (!el) return
+                  lastSummaryScrollXRef.current = el.scrollLeft
+                  scheduleTableScrollXPersist("summary", el.scrollLeft)
+                }}
+              >
+                <table className="token-table">
+                  <thead>
+                    <tr>
+                      <th>模型</th>
+                      <th className="token-num">呼叫次數</th>
+                      <th className="token-num">Input Token</th>
+                      <th className="token-num">Output Token</th>
+                      <th className="token-num">Total Token</th>
+                      <th className="token-num">估計費用 (USD)</th>
                     </tr>
-                  ))}
-                </tbody>
-                <tfoot>
-                  <tr className="token-total-row">
-                    <td>合計</td>
-                    <td className="token-num">{formatNum(records.length)}</td>
-                    <td className="token-num">{formatNum(totalInput)}</td>
-                    <td className="token-num">{formatNum(totalOutput)}</td>
-                    <td className="token-num">{formatNum(totalInput + totalOutput)}</td>
-                    <td className="token-num token-cost">{formatCost(totalCost)}</td>
-                  </tr>
-                </tfoot>
-              </table>
-            </div>
+                  </thead>
+                  <tbody>
+                    {summaryPageRows.map((s) => (
+                      <tr key={s.model}>
+                        <td className="token-model" title={s.model}>{modelLabel(s.model)}</td>
+                        <td className="token-num">{formatNum(s.count)}</td>
+                        <td className="token-num">{formatNum(s.input_tokens)}</td>
+                        <td className="token-num">{formatNum(s.output_tokens)}</td>
+                        <td className="token-num">{formatNum(s.input_tokens + s.output_tokens)}</td>
+                        <td className="token-num token-cost">{formatCost(s.cost)}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                  <tfoot>
+                    <tr className="token-total-row">
+                      <td>合計</td>
+                      <td className="token-num">{formatNum(records.length)}</td>
+                      <td className="token-num">{formatNum(totalInput)}</td>
+                      <td className="token-num">{formatNum(totalOutput)}</td>
+                      <td className="token-num">{formatNum(totalInput + totalOutput)}</td>
+                      <td className="token-num token-cost">{formatCost(totalCost)}</td>
+                    </tr>
+                  </tfoot>
+                </table>
+              </div>
+              <div className="token-pagination">
+                <div className="token-pagination-meta">
+                  顯示 {summary.length === 0 ? 0 : summaryPageStart + 1}-
+                  {Math.min(summaryPageStart + PAGE_SIZE, summary.length)} / 共 {summary.length} 筆
+                </div>
+                <div className="token-pagination-actions">
+                  <button
+                    type="button"
+                    className="token-page-btn"
+                    onClick={() => setSummaryPage((p) => Math.max(1, p - 1))}
+                    disabled={safeSummaryPage <= 1}
+                  >
+                    上一頁
+                  </button>
+                  <span className="token-page-indicator">
+                    第 {safeSummaryPage} / {summaryPageCount} 頁
+                  </span>
+                  <button
+                    type="button"
+                    className="token-page-btn"
+                    onClick={() => setSummaryPage((p) => Math.min(summaryPageCount, p + 1))}
+                    disabled={safeSummaryPage >= summaryPageCount}
+                  >
+                    下一頁
+                  </button>
+                </div>
+              </div>
+            </>
           )}
         </section>
 
@@ -397,41 +452,70 @@ export function TokenUsagePage({
               {loading ? "載入中…" : "此區間無資料"}
             </p>
           ) : (
-            <div
-              ref={detailTableWrapRef}
-              className="token-table-wrap"
-              onScroll={() => {
-                const el = detailTableWrapRef.current
-                if (!el) return
-                lastDetailScrollXRef.current = el.scrollLeft
-                scheduleTableScrollXPersist("detail", el.scrollLeft)
-              }}
-            >
-              <table className="token-table">
-                <thead>
-                  <tr>
-                    <th>時間（本地）</th>
-                    <th>模型</th>
-                    <th>來源</th>
-                    <th className="token-num">Input</th>
-                    <th className="token-num">Output</th>
-                    <th className="token-num">費用 (USD)</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {[...records].reverse().map((r, i) => (
-                    <tr key={i}>
-                      <td className="token-ts">{formatTimestamp(r.timestamp)}</td>
-                      <td className="token-model" title={r.model}>{modelLabel(r.model)}</td>
-                      <td className="token-source" title={r.source}>{sourceLabel(r.source)}</td>
-                      <td className="token-num">{formatNum(r.input_tokens)}</td>
-                      <td className="token-num">{formatNum(r.output_tokens)}</td>
-                      <td className="token-num token-cost">{formatCost(estimateCost(r.model, r.input_tokens, r.output_tokens))}</td>
+            <>
+              <div
+                ref={detailTableWrapRef}
+                className="token-table-wrap"
+                onScroll={() => {
+                  const el = detailTableWrapRef.current
+                  if (!el) return
+                  lastDetailScrollXRef.current = el.scrollLeft
+                  scheduleTableScrollXPersist("detail", el.scrollLeft)
+                }}
+              >
+                <table className="token-table">
+                  <thead>
+                    <tr>
+                      <th>時間（本地）</th>
+                      <th>模型</th>
+                      <th>來源</th>
+                      <th className="token-num">Input</th>
+                      <th className="token-num">Output</th>
+                      <th className="token-num">費用 (USD)</th>
                     </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
+                  </thead>
+                  <tbody>
+                    {detailPageRows.map((r, i) => (
+                      <tr key={`${r.timestamp}-${r.model}-${r.source}-${detailPageStart + i}`}>
+                        <td className="token-ts">{formatTimestamp(r.timestamp)}</td>
+                        <td className="token-model" title={r.model}>{modelLabel(r.model)}</td>
+                        <td className="token-source" title={r.source}>{sourceLabel(r.source)}</td>
+                        <td className="token-num">{formatNum(r.input_tokens)}</td>
+                        <td className="token-num">{formatNum(r.output_tokens)}</td>
+                        <td className="token-num token-cost">{formatCost(estimateCost(r.model, r.input_tokens, r.output_tokens))}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+              <div className="token-pagination">
+                <div className="token-pagination-meta">
+                  顯示 {records.length === 0 ? 0 : detailPageStart + 1}-
+                  {Math.min(detailPageStart + PAGE_SIZE, records.length)} / 共 {records.length} 筆
+                </div>
+                <div className="token-pagination-actions">
+                  <button
+                    type="button"
+                    className="token-page-btn"
+                    onClick={() => setDetailPage((p) => Math.max(1, p - 1))}
+                    disabled={safeDetailPage <= 1}
+                  >
+                    上一頁
+                  </button>
+                  <span className="token-page-indicator">
+                    第 {safeDetailPage} / {detailPageCount} 頁
+                  </span>
+                  <button
+                    type="button"
+                    className="token-page-btn"
+                    onClick={() => setDetailPage((p) => Math.min(detailPageCount, p + 1))}
+                    disabled={safeDetailPage >= detailPageCount}
+                  >
+                    下一頁
+                  </button>
+                </div>
+              </div>
+            </>
           )}
         </section>
       </div>
