@@ -22,7 +22,7 @@ export const TOOLS: ToolDefinition[] = [
   {
     id: "ecommerce-image",
     name: "AI 電商圖文助手",
-    description: "請先上傳一張商品圖，再輸入商品描述或網址，自動生成9款電商風格圖",
+    description: "請先上傳一張商品圖，再輸入商品描述或網址(或上傳商品說明文件)，自動生成9款電商風格圖",
     icon: "🛍️",
     chatTitle: "AI 電商圖文助手",
     inputPlaceholder: "描述商品特色或訴求（可空白，上傳圖片後直接送出）",
