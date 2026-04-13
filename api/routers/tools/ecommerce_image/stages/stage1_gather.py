@@ -81,12 +81,19 @@ async def gather_product_info(
 
     if dedup_urls:
         url_mandatory_block = (
-            "【強制工具】使用者輸入含下列網址，必須先呼叫 fetch_webpage 工具取得實際內容，禁止推測頁面內容，\n"
+            "查看使用者訊息會和附件內容，若附件內容包含商品資訊，則優先使用附件內容作為商品資訊的補充參考。\n"
+            "【工具使用規則】:如使用提供資訊不足，則使用工具取得實際內容。\n"
+            "使用者輸入含下列網址，必須先呼叫 fetch_webpage 工具取得實際內容，禁止推測頁面內容，\n"
             "禁止在未瀏覽前推測該網址上的規格或文案。\n"
             f"網址清單：{'、'.join(dedup_urls)}"
         )
     else:
-        url_mandatory_block = "【網址規則】若使用者訊息中出現 http(s) 網址，必須先呼叫 fetch_webpage 工具取得實際內容，禁止推測頁面內容。"
+        url_mandatory_block = (
+            "查看使用者訊息會和附件內容，若附件內容包含商品資訊，則優先使用附件內容作為商品資訊的補充參考。\n"
+            "【工具使用規則】:如使用提供資訊不足，則使用工具取得實際內容。\n"
+            "【網址規則】若使用者訊息中出現 http(s) 網址，必須先呼叫 fetch_webpage 工具取得實際內容，禁止推測頁面內容。\n"
+            "禁止在未瀏覽前推測該網址上的規格或文案。\n"
+        )
 
     doc_block = ""
     if doc_texts:
@@ -103,7 +110,7 @@ async def gather_product_info(
     info_prompt = f"""
 請仔細分析我上傳的商品圖片，並結合以下用戶提供的文字或網址資訊：
 「{user_input}」
-{doc_block}{url_mandatory_block}
+{doc_block}
 請主動搜尋相關資料，依照以下結構逐項整理，這些資訊將直接用於後續生成 9 張電商商品圖的 AI 繪圖提示詞（P1～P9）：
 
 【基本資訊】
@@ -158,7 +165,7 @@ async def gather_product_info(
     try:
         if use_webapi:
             response = await gemini_client.generate_content(
-                info_prompt,
+                url_mandatory_block + "\n\n" + info_prompt,
                 model="gemini-3-flash-thinking",
                 files=[image_path],
             )
@@ -169,10 +176,11 @@ async def gather_product_info(
                 model=get_text_model(),
                 config=types.GenerateContentConfig(
                     tools=[bounded_search, fetch_webpage],
+                    system_instruction=url_mandatory_block,
                     automatic_function_calling=types.AutomaticFunctionCallingConfig(
                         disable=False,
                         # 搜尋最多 get_max_llm_search_calls() 次（見 make_bounded_search_web）；其餘額度給 fetch_webpage
-                        maximum_remote_calls=get_max_llm_search_calls() + 25,
+                        maximum_remote_calls=get_max_llm_search_calls() + 2,
                     ),
                 ),
             )
