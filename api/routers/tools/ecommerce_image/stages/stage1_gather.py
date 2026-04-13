@@ -11,6 +11,7 @@ from google.genai import types
 
 from core.config import get_text_model
 from core.progress import GROUP_STAGE1_TOOLS, ProgressBus, progress_cv
+from core.token_logger import log_token_usage
 from services.web_search import fetch_webpage, get_max_llm_search_calls, make_bounded_search_web
 
 
@@ -161,6 +162,17 @@ async def gather_product_info(
                 info_chat.send_message,
                 [info_prompt, image],
             )
+            usage = getattr(response, "usage_metadata", None)
+            if usage is not None:
+                try:
+                    log_token_usage(
+                        model=get_text_model(),
+                        source="stage1_gather",
+                        input_tokens=getattr(usage, "prompt_token_count", 0) or 0,
+                        output_tokens=getattr(usage, "candidates_token_count", 0) or 0,
+                    )
+                except Exception:
+                    pass
             gathered_info = _response_text_safe(response)
 
         print("\n✅ [階段一完成] 收集到的商品資訊如下：")

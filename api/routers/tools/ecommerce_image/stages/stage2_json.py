@@ -12,6 +12,7 @@ from google.genai import types
 
 from core.config import get_text_model
 from core.progress import GROUP_STAGE2_META, ProgressBus
+from core.token_logger import log_token_usage
 
 from api.routers.tools.ecommerce_image.prompts.json_schema import prompt_template
 from api.routers.tools.ecommerce_image.utils.json_utils import (
@@ -110,6 +111,17 @@ async def generate_json_plan(
                 response_mime_type="application/json",
             ),
         )
+        usage = getattr(response, "usage_metadata", None)
+        if usage is not None:
+            try:
+                log_token_usage(
+                    model=get_text_model(),
+                    source="stage2_json",
+                    input_tokens=getattr(usage, "prompt_token_count", 0) or 0,
+                    output_tokens=getattr(usage, "candidates_token_count", 0) or 0,
+                )
+            except Exception:
+                pass
         raw_output = response.text or ""
 
     candidate = extract_json_candidate(raw_output)

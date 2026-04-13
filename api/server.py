@@ -16,7 +16,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from api.deps import project_root
-from api.routers import session, settings, media
+from api.routers import session, settings, media, token_usage
 from api.routers.tools.ecommerce_image import router as ecommerce_image_router_module
 from api.routers.tools.ecommerce_image.image_thread import router as image_thread_router_module
 from core.config import sync_managed_env_from_dotenv
@@ -41,6 +41,7 @@ app.add_middleware(
 app.include_router(session.router)
 app.include_router(settings.router)
 app.include_router(media.router)
+app.include_router(token_usage.router)
 
 # ── 工具 Router（每個工具獨立掛載）────────────────────────────────────────────
 app.include_router(ecommerce_image_router_module.router)

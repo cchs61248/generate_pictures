@@ -1459,3 +1459,141 @@
     rgba(168, 199, 250, 0.38)
   );
 }
+
+/* ── Token 用量頁面 ──────────────────────────────────────────────────────── */
+
+.token-filter-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  gap: 0.75rem;
+  margin-bottom: 1.5rem;
+}
+
+.token-filter-label {
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+  font-size: 0.82rem;
+  color: rgba(227, 227, 227, 0.65);
+}
+
+.token-filter-sep {
+  padding-bottom: 0.55rem;
+  color: rgba(227, 227, 227, 0.35);
+}
+
+.token-date-input {
+  padding: 0.55rem 0.75rem;
+  border-radius: 0.65rem;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  background: #1e1e1e;
+  color: #e3e3e3;
+  font-size: 0.88rem;
+  min-height: 40px;
+  cursor: pointer;
+}
+
+.token-date-input:focus {
+  outline: none;
+  border-color: rgba(138, 180, 248, 0.45);
+}
+
+.token-refresh-btn {
+  padding: 0.55rem 1.1rem;
+  border: none;
+  border-radius: 999px;
+  background: rgba(138, 180, 248, 0.15);
+  color: #a8c7fa;
+  font-size: 0.88rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background 0.15s;
+  min-height: 40px;
+}
+
+.token-refresh-btn:hover:not(:disabled) {
+  background: rgba(138, 180, 248, 0.28);
+}
+
+.token-refresh-btn:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+.token-section {
+  margin-bottom: 2rem;
+}
+
+.token-section-title {
+  font-size: 0.95rem;
+  font-weight: 600;
+  color: rgba(227, 227, 227, 0.8);
+  margin: 0 0 0.75rem;
+  padding-bottom: 0.5rem;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.07);
+}
+
+.token-table-wrap {
+  overflow-x: auto;
+}
+
+.token-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.84rem;
+}
+
+.token-table th,
+.token-table td {
+  padding: 0.5rem 0.75rem;
+  text-align: left;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+  white-space: nowrap;
+}
+
+.token-table th {
+  font-weight: 600;
+  font-size: 0.78rem;
+  color: rgba(227, 227, 227, 0.5);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  background: rgba(255, 255, 255, 0.03);
+}
+
+.token-table tbody tr:hover {
+  background: rgba(255, 255, 255, 0.03);
+}
+
+.token-table tfoot td {
+  border-top: 1px solid rgba(255, 255, 255, 0.12);
+  border-bottom: none;
+}
+
+.token-total-row td {
+  font-weight: 600;
+  color: #a8c7fa;
+}
+
+.token-num {
+  text-align: right !important;
+  font-variant-numeric: tabular-nums;
+  font-family: ui-monospace, monospace;
+}
+
+.token-model {
+  font-family: ui-monospace, monospace;
+  font-size: 0.8rem;
+  color: #a8c7fa;
+}
+
+.token-source {
+  font-size: 0.8rem;
+  color: rgba(227, 227, 227, 0.6);
+}
+
+.token-ts {
+  font-family: ui-monospace, monospace;
+  font-size: 0.8rem;
+  color: rgba(227, 227, 227, 0.55);
+}

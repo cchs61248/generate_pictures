@@ -417,6 +417,36 @@ export async function consumeRunStream(
   }
 }
 
+// ── Token 用量 ─────────────────────────────────────────────────────────────────
+
+export type TokenUsageRecord = {
+  timestamp: string
+  model: string
+  source: string
+  input_tokens: number
+  output_tokens: number
+}
+
+export async function fetchTokenUsage(
+  baseUrl: string,
+  start?: string,
+  end?: string,
+): Promise<TokenUsageRecord[]> {
+  const base = trimSlash(baseUrl)
+  const params = new URLSearchParams()
+  if (start) params.set("start", start)
+  if (end) params.set("end", end)
+  const qs = params.toString()
+  const url = `${base}/token-usage${qs ? `?${qs}` : ""}`
+  const res = await fetch(url)
+  if (!res.ok) {
+    const body = await safeJson(res)
+    throw new Error(extractDetail(body) || `取得 token 用量失敗：HTTP ${res.status}`)
+  }
+  const data = (await res.json()) as { records: TokenUsageRecord[] }
+  return data.records ?? []
+}
+
 /** 將後端回傳的絕對路徑轉成可顯示的圖片 URL */
 export function imageUrlsFromSavedFiles(
   savedFiles: string[],

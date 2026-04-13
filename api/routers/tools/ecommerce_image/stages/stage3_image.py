@@ -10,7 +10,9 @@ import os
 
 from PIL import Image
 
+from core.config import get_image_model
 from core.progress import ProgressBus
+from core.token_logger import log_token_usage
 from services.image_gen import generate_image_with_retry, generate_image_webapi
 
 from api.routers.tools.ecommerce_image.prompts.image_style import prompt_template as picture_style_template
@@ -117,6 +119,17 @@ async def generate_all_images(
                     image_prompt,
                     image,
                 )
+                usage = getattr(response, "usage_metadata", None)
+                if usage is not None:
+                    try:
+                        log_token_usage(
+                            model=get_image_model(),
+                            source="stage3_image",
+                            input_tokens=getattr(usage, "prompt_token_count", 0) or 0,
+                            output_tokens=getattr(usage, "candidates_token_count", 0) or 0,
+                        )
+                    except Exception:
+                        pass
                 for part in response.parts:
                     if part.inline_data is not None:
                         raw_image = Image.open(io.BytesIO(part.inline_data.data))

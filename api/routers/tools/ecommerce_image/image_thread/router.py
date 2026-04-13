@@ -25,7 +25,8 @@ from api.routers.tools.ecommerce_image.image_thread.service import (
     load_image_thread_history,
     save_image_thread_history,
 )
-from core.config import get_image_model, sync_managed_env_from_dotenv
+from core.config import get_image_model, sync_managed_env_from_dotenv, get_image_output_size
+from core.token_logger import log_token_usage
 
 router = APIRouter(tags=["ecommerce-image-thread"])
 
@@ -124,8 +125,24 @@ async def chat_image_thread(payload: dict, request: Request):
                 config=genai_types.GenerateContentConfig(
                     system_instruction=system_instruction,
                     response_modalities=["TEXT", "IMAGE"],
+                    image_config=genai_types.ImageConfig(
+                        aspect_ratio="1:1",
+                        image_size=get_image_output_size(),
+                    ),
                 ),
             )
+
+            usage = getattr(response, "usage_metadata", None)
+            if usage is not None:
+                try:
+                    log_token_usage(
+                        model=model_name,
+                        source="image_thread",
+                        input_tokens=getattr(usage, "prompt_token_count", 0) or 0,
+                        output_tokens=getattr(usage, "candidates_token_count", 0) or 0,
+                    )
+                except Exception:
+                    pass
 
             result_text = ""
             result_image_bytes: bytes | None = None

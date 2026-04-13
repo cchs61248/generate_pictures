@@ -13,6 +13,8 @@ type Props = {
   onNavigate?: () => void
   onOpenSettings: () => void
   settingsActive?: boolean
+  onOpenTokenUsage: () => void
+  tokenUsageActive?: boolean
 }
 
 export function Sidebar({
@@ -25,6 +27,8 @@ export function Sidebar({
   onNavigate,
   onOpenSettings,
   settingsActive = false,
+  onOpenTokenUsage,
+  tokenUsageActive = false,
 }: Props) {
   const [query, setQuery] = useState("")
   const [menuOpenId, setMenuOpenId] = useState<string | null>(null)
@@ -106,6 +110,11 @@ export function Sidebar({
 
   const handleSettings = () => {
     onOpenSettings()
+    onNavigate?.()
+  }
+
+  const handleTokenUsage = () => {
+    onOpenTokenUsage()
     onNavigate?.()
   }
 
@@ -374,6 +383,17 @@ export function Sidebar({
       </div>
 
       <div className="sidebar-footer">
+        <button
+          type="button"
+          className={`sidebar-settings-btn ${tokenUsageActive ? "sidebar-settings-btn--active" : ""}`}
+          onClick={handleTokenUsage}
+          aria-current={tokenUsageActive ? "page" : undefined}
+        >
+          <span className="sidebar-settings-icon" aria-hidden>
+            📊
+          </span>
+          <span>Token 用量</span>
+        </button>
         <button
           type="button"
           className={`sidebar-settings-btn ${settingsActive ? "sidebar-settings-btn--active" : ""}`}

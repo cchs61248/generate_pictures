@@ -18,6 +18,7 @@ import { ChatWindow } from "./components/ChatWindow"
 import { InputBar } from "./components/InputBar"
 import { SettingsPage } from "./components/SettingsPage"
 import { Sidebar } from "./components/Sidebar"
+import { TokenUsagePage } from "./components/TokenUsagePage"
 import { readFileAsDataUrl } from "./readFileAsDataUrl"
 import { getToolById, TOOLS } from "./tools"
 import { titleFromMessages } from "./titleUtils"
@@ -217,7 +218,7 @@ export default function App() {
   const [sidebarOpen, setSidebarOpen] = useState(() =>
     typeof window !== "undefined" ? window.innerWidth > 900 : true,
   )
-  const [mainView, setMainView] = useState<"chat" | "settings">("chat")
+  const [mainView, setMainView] = useState<"chat" | "settings" | "token_usage">("chat")
   /**
    * 點擊工具後建立的「暫存對話」，尚未加入 sessions。
    * 送出第一筆訊息時才正式 commit 進 sessions。
@@ -691,6 +692,11 @@ export default function App() {
   const handleOpenSettings = useCallback(() => {
     flushMessagesScroll()
     setMainView("settings")
+  }, [flushMessagesScroll])
+
+  const handleOpenTokenUsage = useCallback(() => {
+    flushMessagesScroll()
+    setMainView("token_usage")
   }, [flushMessagesScroll])
 
   const handleRenameSession = useCallback(
@@ -1307,6 +1313,8 @@ export default function App() {
           onDelete={handleDeleteChat}
           settingsActive={mainView === "settings"}
           onOpenSettings={handleOpenSettings}
+          tokenUsageActive={mainView === "token_usage"}
+          onOpenTokenUsage={handleOpenTokenUsage}
           onNavigate={() => {
             if (typeof window !== "undefined" && window.matchMedia("(max-width: 900px)").matches) {
               setSidebarOpen(false)
@@ -1323,7 +1331,7 @@ export default function App() {
             >
               ☰
             </button>
-            {mainView === "settings" ? (
+            {mainView === "settings" || mainView === "token_usage" ? (
               <button
                 type="button"
                 className="app-header-back"
@@ -1336,7 +1344,9 @@ export default function App() {
               <h1 className="app-title">
                 {mainView === "settings"
                   ? "設定與說明"
-                  : activeSession?.parentId
+                  : mainView === "token_usage"
+                    ? "Token 用量"
+                    : activeSession?.parentId
                     ? activeSession.title
                     : activeSession?.toolId
                       ? (getToolById(activeSession.toolId)?.chatTitle ?? "AI 助手")
@@ -1347,13 +1357,15 @@ export default function App() {
           </header>
           <main
             className={
-              mainView === "settings"
+              mainView === "settings" || mainView === "token_usage"
                 ? "app-main app-main--settings"
                 : "app-main app-main--chat"
             }
           >
             {mainView === "settings" ? (
               <SettingsPage baseUrl={baseUrl} />
+            ) : mainView === "token_usage" ? (
+              <TokenUsagePage baseUrl={baseUrl} />
             ) : (
               <>
                 <ChatWindow
