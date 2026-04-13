@@ -15,7 +15,6 @@ from core.progress import ProgressBus
 from core.token_logger import log_token_usage
 from services.image_gen import generate_image_with_retry, generate_image_webapi
 
-from api.routers.tools.ecommerce_image.prompts.image_style import prompt_template as picture_style_template
 from api.routers.tools.ecommerce_image.services.image_process import build_safe_name, compose_image_prompt
 
 
@@ -68,7 +67,7 @@ async def generate_all_images(
             break
         sort_num = item["sort"]
         main_name = item["main"].replace('Prompt', '')
-        image_prompt = compose_image_prompt(picture_style_template, item)
+        image_prompt = compose_image_prompt(item)
         safe_name = build_safe_name(main_name)
         group_id = f"stage3_p{sort_num:02d}"
 

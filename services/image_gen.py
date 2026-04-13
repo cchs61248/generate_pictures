@@ -5,6 +5,7 @@ import time
 from google.genai import types
 
 from core.config import get_image_model, get_image_output_size
+from api.routers.tools.ecommerce_image.prompts.image_style import prompt_template as picture_style_template
 
 
 def is_transient_google_api_error(err_str: str) -> bool:
@@ -39,6 +40,7 @@ def generate_image_with_retry(
                 model=get_image_model(),
                 contents=[image_prompt, product_image],
                 config=types.GenerateContentConfig(
+                    system_instruction=picture_style_template,
                     response_modalities=["IMAGE"],
                     image_config=types.ImageConfig(
                         aspect_ratio="1:1",
@@ -63,6 +65,8 @@ async def generate_image_webapi(
     max_retries: int = 5,
 ) -> list:
     final_prompt = f"""請幫我生成一張電商商品圖片，圖片大小1000*1000，請參考我上傳的商品圖片外觀，依照以下設計要求生成：
+
+{picture_style_template}
 
 {image_prompt}
 """

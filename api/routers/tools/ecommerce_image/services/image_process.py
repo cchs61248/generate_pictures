@@ -9,13 +9,11 @@ def build_safe_name(main_name: str) -> str:
     return main_name.replace(" ", "_").replace("/", "_").replace("：", "")
 
 
-def compose_image_prompt(style_prompt: str, item: dict) -> str:
+def compose_image_prompt(item: dict) -> str:
     copy_block = item["copy"]
     tags = copy_block["tags"]
     tags_quoted = " ".join(f"《{t}》" for t in tags)
-    return f"""{style_prompt}
-
-### {item["main"]}
+    return f"""### {item["main"]}
 - scene：{item["scene"]}
 - specs：{item["specs"]}
 
