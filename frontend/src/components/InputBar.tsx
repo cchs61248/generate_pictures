@@ -24,6 +24,10 @@ type Props = {
   showReferenceMissingWarning?: boolean
   /** 子討論串模式：true 時送出按鈕在無文字時禁用 */
   requireTextToSend?: boolean
+  /** 主對話：須已上傳／具備參考圖才可送出 */
+  requireReferenceToSend?: boolean
+  /** 與 requireReferenceToSend 搭配：後端已就緒（上傳成功或 session 已有參考圖） */
+  referenceReady?: boolean
 }
 
 export function InputBar({
@@ -45,6 +49,8 @@ export function InputBar({
   onFallbackSampleStatusChange,
   showReferenceMissingWarning = false,
   requireTextToSend = false,
+  requireReferenceToSend = false,
+  referenceReady = true,
 }: Props) {
   const thumbSrc =
     previewUrl ?? inputPreviewDataUrl ?? fallbackSamplePreviewUrl ?? null
@@ -69,11 +75,19 @@ export function InputBar({
     if (fileRef.current) fileRef.current.value = ""
   }
 
-  const sendBlocked = requireTextToSend && !value.trim()
+  const sendBlocked =
+    (requireTextToSend && !value.trim()) ||
+    (requireReferenceToSend && !referenceReady)
 
   const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
     if (e.key === "Enter" && !e.shiftKey) {
       e.preventDefault()
+      if (requireReferenceToSend && !referenceReady) {
+        window.alert(
+          "請先使用 📎 上傳一張商品圖片，成功後再送出。",
+        )
+        return
+      }
       if (!disabled && !uploading && !sendBlocked) onSend()
     }
   }
@@ -156,6 +170,11 @@ export function InputBar({
             className={isStreaming ? "input-stop" : "input-send"}
             onClick={isStreaming ? onStop : onSend}
             disabled={uploading || showCompleted || (!isStreaming && (disabled || sendBlocked))}
+            title={
+              !isStreaming && requireReferenceToSend && !referenceReady
+                ? "請先上傳一張商品圖"
+                : undefined
+            }
           >
             {isStreaming ? "停止" : "送出"}
           </button>

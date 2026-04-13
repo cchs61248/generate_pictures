@@ -14,6 +14,7 @@ from api.deps import (
     apply_session_sample_path,
     project_root,
     readable_error,
+    require_session_upload_exists,
     sse_streaming_response,
 )
 from core.config import parse_config, sync_managed_env_from_dotenv
@@ -32,6 +33,7 @@ async def run_generation(payload: dict):
 
     root = project_root()
     sync_managed_env_from_dotenv(os.path.join(root, ".env"))
+    require_session_upload_exists(session_id)
     config = parse_config(stage3_only_flag=stage3_only)
     config = apply_session_sample_path(config, session_id)
 
@@ -55,6 +57,7 @@ async def run_generation_stream(payload: dict, request: Request):
 
     root = project_root()
     sync_managed_env_from_dotenv(os.path.join(root, ".env"))
+    require_session_upload_exists(session_id)
     config = parse_config(stage3_only_flag=stage3_only)
     config = apply_session_sample_path(config, session_id)
 

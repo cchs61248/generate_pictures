@@ -1152,17 +1152,9 @@ export default function App() {
       return
     }
 
-    // 一般 session（主 session）原有邏輯
+    // 一般 session（主 session）原有邏輯（送出鈕應已禁用；此為保險）
     if (!serverReady) {
-      patchActiveMessages((m) => [
-        ...m,
-        {
-          id: newId(),
-          role: "assistant",
-          text: "請先使用 📎 上傳一張商品圖片，成功後再送出。",
-          error: true,
-        },
-      ])
+      window.alert("請先使用 📎 上傳一張商品圖片，成功後再送出。")
       return
     }
 
@@ -1641,6 +1633,8 @@ export default function App() {
                   uploading={imageThreadLocked ? false : uploading}
                   lockImageThread={imageThreadLocked}
                   requireTextToSend={imageThreadLocked}
+                  requireReferenceToSend={!imageThreadLocked}
+                  referenceReady={serverReady}
                 />
               </>
             )}

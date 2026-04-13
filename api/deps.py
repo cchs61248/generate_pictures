@@ -57,6 +57,25 @@ def upload_image_path_for_session(root: str, session_id: str) -> str:
     return os.path.join(root, "uploads", f"{sid}.jpg")
 
 
+def require_session_upload_exists(session_id: str | None) -> None:
+    """
+    電商主流程前置條件：須帶合法 session_id，且 uploads/<session_id>.jpg 已存在。
+    避免未上傳商品圖時仍誤用根目錄 sample.jpg 執行。
+    """
+    sid = safe_session_id(session_id)
+    if not sid:
+        raise HTTPException(
+            status_code=400,
+            detail="請先上傳一張商品圖（缺少或無效的 session_id）。",
+        )
+    path = os.path.join(project_root(), "uploads", f"{sid}.jpg")
+    if not os.path.isfile(path):
+        raise HTTPException(
+            status_code=400,
+            detail="請先上傳一張商品圖後再執行。",
+        )
+
+
 def apply_session_sample_path(config, session_id: str | None):
     """將 session 的圖片路徑與 final_output_path 套用至 config 物件。"""
     root = project_root()
