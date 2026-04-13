@@ -57,7 +57,7 @@ def get_image_model() -> str:
 def get_image_output_size() -> str:
     """IMAGE_OUTPUT_SIZE：Gemini 產圖像素等級，僅支援 1K / 2K / 4K（預設 1K）。較高解析有助筆畫較多的中文。"""
     raw = (os.environ.get("IMAGE_OUTPUT_SIZE") or "1K").strip().upper()
-    if raw in ("1K", "2K", "4K"):
+    if raw in ("512", "1K", "2K", "4K"):
         return raw
     return "1K"
 
@@ -98,7 +98,7 @@ MANAGED_ENV_VARS: tuple[ManagedEnvVar, ...] = (
     ),
     ManagedEnvVar(
         "IMAGE_OUTPUT_SIZE",
-        "API 產圖輸出尺寸：1K、2K 或 4K（預設 1K）。含大量中文時可試 2K 以減少字元變形。",
+        "API 產圖輸出尺寸：512(中文可能變形)、1K、2K 或 4K（預設 1K）。含大量中文時可試 2K 以減少字元變形。",
     ),
     ManagedEnvVar(
         "GEMINI_COOKIE_1PSID",

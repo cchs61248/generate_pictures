@@ -31,6 +31,37 @@ type Props = {
   /** 切換頁面前／離開頁面時立即寫入 */
   onListScrollPersistNow?: (scrollTop: number) => void
   listScrollFlushRef?: MutableRefObject<() => void>
+  /** 主 session 子討論串展開狀態（持久化）；缺省該 id 時視為展開 */
+  expandedParents?: Record<string, boolean>
+  onExpandedParentsChange?: (next: Record<string, boolean>) => void
+}
+
+function mergeSidebarExpandedParents(
+  prev: Record<string, boolean>,
+  roots: ChatSession[],
+  childMap: Record<string, ChatSession[]>,
+): Record<string, boolean> {
+  const next: Record<string, boolean> = { ...prev }
+  const rootIds = new Set(roots.map((r) => r.id))
+  for (const id of Object.keys(next)) {
+    if (!rootIds.has(id)) delete next[id]
+  }
+  for (const root of roots) {
+    if (!childMap[root.id]?.length) continue
+    if (next[root.id] === undefined) next[root.id] = true
+  }
+  return next
+}
+
+function sameExpandedParents(
+  a: Record<string, boolean>,
+  b: Record<string, boolean>,
+): boolean {
+  const keys = new Set([...Object.keys(a), ...Object.keys(b)])
+  for (const k of keys) {
+    if ((a[k] ?? true) !== (b[k] ?? true)) return false
+  }
+  return true
 }
 
 export function Sidebar({
@@ -50,7 +81,10 @@ export function Sidebar({
   onListScrollPersist,
   onListScrollPersistNow,
   listScrollFlushRef,
+  expandedParents: expandedParentsProp,
+  onExpandedParentsChange,
 }: Props) {
+  const expandedParents = expandedParentsProp ?? {}
   const [query, setQuery] = useState("")
   const [menuOpenId, setMenuOpenId] = useState<string | null>(null)
   const [renamingId, setRenamingId] = useState<string | null>(null)
@@ -60,7 +94,6 @@ export function Sidebar({
   const sidebarListRef = useRef<HTMLUListElement>(null)
   const lastListScrollTopRef = useRef(0)
   const [toolsExpanded, setToolsExpanded] = useState(true)
-  const [expandedParents, setExpandedParents] = useState<Record<string, boolean>>({})
 
   const { roots, childMap } = useMemo(() => {
     const rootList: ChatSession[] = []
@@ -88,16 +121,11 @@ export function Sidebar({
   }, [childMap, query, roots])
 
   useEffect(() => {
-    setExpandedParents((prev) => {
-      const next = { ...prev }
-      for (const root of roots) {
-        if (childMap[root.id]?.length && next[root.id] === undefined) {
-          next[root.id] = true
-        }
-      }
-      return next
-    })
-  }, [childMap, roots])
+    if (!onExpandedParentsChange) return
+    const merged = mergeSidebarExpandedParents(expandedParents, roots, childMap)
+    if (sameExpandedParents(merged, expandedParents)) return
+    onExpandedParentsChange(merged)
+  }, [childMap, roots, expandedParents, onExpandedParentsChange])
 
   useEffect(() => {
     if (renamingId && renameInputRef.current) {
@@ -278,16 +306,19 @@ export function Sidebar({
                 {children.length > 0 ? (
                   <button
                     type="button"
-                    className={`sidebar-tree-toggle ${rootExpanded ? "sidebar-tree-toggle--open" : ""}`}
+                    className={`sidebar-tree-toggle ${rootExpanded ? "sidebar-tree-toggle--open" : "sidebar-tree-toggle--collapsed"}`}
                     aria-label={rootExpanded ? "收合子討論串" : "展開子討論串"}
-                    onClick={() =>
-                      setExpandedParents((prev) => ({
-                        ...prev,
-                        [s.id]: !(prev[s.id] ?? true),
-                      }))
-                    }
+                    onClick={() => {
+                      const was = expandedParents[s.id] ?? true
+                      onExpandedParentsChange?.({
+                        ...expandedParents,
+                        [s.id]: !was,
+                      })
+                    }}
                   >
-                    ▾
+                    <span className="sidebar-tree-chevron" aria-hidden>
+                      ›
+                    </span>
                   </button>
                 ) : (
                   <span className="sidebar-tree-toggle sidebar-tree-toggle--placeholder" />

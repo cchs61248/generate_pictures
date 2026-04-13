@@ -8,6 +8,8 @@ export type PersistedMainView = "chat" | "settings" | "token_usage"
 /** 側欄／設定與 Token 頁等 UI 捲動位置（與對話 messagesScrollTop 分開存） */
 export type PersistedUiScroll = {
   sidebarList?: number
+  /** 側欄主 session（有子討論串）是否展開；缺省為 true，顯式 false 表示收合 */
+  sidebarExpandedParents?: Record<string, boolean>
   settingsMain?: number
   tokenUsageMain?: number
   tokenUsageSummaryTableX?: number

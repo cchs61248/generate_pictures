@@ -718,6 +718,13 @@ export default function App() {
     setUiScroll((s) => ({ ...s, sidebarList: scrollTop }))
   }, [])
 
+  const patchSidebarExpandedParents = useCallback(
+    (next: Record<string, boolean>) => {
+      setUiScroll((s) => ({ ...s, sidebarExpandedParents: next }))
+    },
+    [],
+  )
+
   const persistTokenTableScrollX = useCallback(
     (which: "summary" | "detail", scrollLeft: number) => {
       setUiScroll((s) =>
@@ -1514,6 +1521,8 @@ export default function App() {
           onListScrollPersist={scheduleSidebarListScrollPersist}
           onListScrollPersistNow={persistSidebarListScrollNow}
           listScrollFlushRef={sidebarListScrollFlushRef}
+          expandedParents={uiScroll.sidebarExpandedParents ?? {}}
+          onExpandedParentsChange={patchSidebarExpandedParents}
           onNavigate={() => {
             if (typeof window !== "undefined" && window.matchMedia("(max-width: 900px)").matches) {
               setSidebarOpen(false)

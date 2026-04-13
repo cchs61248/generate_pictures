@@ -584,18 +584,54 @@
   width: 24px;
   border: none;
   background: transparent;
-  color: rgba(227, 227, 227, 0.62);
   cursor: pointer;
   border-radius: 999px;
   flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
 }
 
-.sidebar-tree-toggle:hover {
-  background: rgba(255, 255, 255, 0.08);
+.sidebar-tree-chevron {
+  display: inline-block;
+  font-size: 1.15rem;
+  line-height: 1;
+  font-weight: 600;
+  transition: transform 0.2s ease, color 0.15s ease, opacity 0.15s ease;
+  transform-origin: center center;
 }
 
+/* 收起：箭頭朝右、較淡 */
+.sidebar-tree-toggle--collapsed {
+  color: rgba(227, 227, 227, 0.38);
+}
+
+.sidebar-tree-toggle--collapsed .sidebar-tree-chevron {
+  transform: rotate(0deg);
+}
+
+.sidebar-tree-toggle--collapsed:hover {
+  background: rgba(255, 255, 255, 0.06);
+  color: rgba(227, 227, 227, 0.72);
+}
+
+.sidebar-tree-toggle--collapsed:hover .sidebar-tree-chevron {
+  color: rgba(227, 227, 227, 0.85);
+}
+
+/* 展開：箭頭朝下、主題藍 */
 .sidebar-tree-toggle--open {
   color: #a8c7fa;
+}
+
+.sidebar-tree-toggle--open .sidebar-tree-chevron {
+  transform: rotate(90deg);
+}
+
+.sidebar-tree-toggle--open:hover {
+  background: rgba(168, 199, 250, 0.12);
+  color: #d3e3fd;
 }
 
 .sidebar-tree-toggle--placeholder {
