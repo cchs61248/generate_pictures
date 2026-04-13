@@ -1597,3 +1597,13 @@
   font-size: 0.8rem;
   color: rgba(227, 227, 227, 0.55);
 }
+
+.token-cost {
+  color: #81c995;
+  font-weight: 500;
+}
+
+.token-total-row .token-cost {
+  color: #57bb70;
+  font-weight: 700;
+}

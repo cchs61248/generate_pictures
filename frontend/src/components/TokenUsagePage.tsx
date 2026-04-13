@@ -18,8 +18,8 @@ function firstDayOfMonthStr(): string {
 /** 所有模型別名（TEXT + IMAGE 合併） */
 const MODEL_LABEL_MAP: Record<string, string> = Object.fromEntries(
   [
-    ...( FALLBACK_MODEL_CHOICES.TEXT_MODEL ?? []),
-    ...( FALLBACK_MODEL_CHOICES.IMAGE_MODEL ?? []),
+    ...(FALLBACK_MODEL_CHOICES.TEXT_MODEL ?? []),
+    ...(FALLBACK_MODEL_CHOICES.IMAGE_MODEL ?? []),
   ].map((o) => [o.value, o.label]),
 )
 
@@ -36,6 +36,54 @@ const SOURCE_LABEL_MAP: Record<string, string> = {
 
 function sourceLabel(source: string): string {
   return SOURCE_LABEL_MAP[source] ?? source
+}
+
+/**
+ * 官方定價（付費層級・標準方案，每 100 萬 token 的美元費率）
+ * 資料來源：https://ai.google.dev/gemini-api/docs/pricing（2026-04-09）
+ * 圖片生成模型的 output 費率以圖片 token 費率為準（遠高於文字 token）。
+ */
+type ModelPricing = {
+  inputPer1M: number
+  outputPer1M: number
+}
+
+const MODEL_PRICING: Record<string, ModelPricing> = {
+  // ── 文字模型 ──────────────────────────────────────────────
+  // Gemini 3 Flash：$0.50 input / $3.00 output per 1M tokens
+  "gemini-3-flash-preview": { inputPer1M: 0.50, outputPer1M: 3.00 },
+  // Gemini 3.1 Flash-Lite：$0.25 input / $1.50 output per 1M tokens
+  "gemini-3.1-flash-lite-preview": { inputPer1M: 0.25, outputPer1M: 1.50 },
+  // Gemini 3.1 Pro：$2.00 input / $12.00 output per 1M tokens（prompt ≤ 200K）
+  "gemini-3.1-pro-preview": { inputPer1M: 2.00, outputPer1M: 12.00 },
+  // Gemini 2.5 Flash：$0.30 input / $2.50 output per 1M tokens
+  "gemini-2.5-flash": { inputPer1M: 0.30, outputPer1M: 2.50 },
+  // Gemini 2.5 Pro：$1.25 input / $10.00 output per 1M tokens（prompt ≤ 200K）
+  "gemini-2.5-pro": { inputPer1M: 1.25, outputPer1M: 10.00 },
+  // ── 圖片生成模型 ───────────────────────────────────────────
+  // Nano Banana 2 (gemini-3.1-flash-image-preview)：$0.50 input / $60 output per 1M tokens（圖片 token）
+  "gemini-3.1-flash-image-preview": { inputPer1M: 0.50, outputPer1M: 60.00 },
+  // Nano Banana Pro (gemini-3-pro-image-preview)：$2.00 input / $120 output per 1M tokens（圖片 token）
+  "gemini-3-pro-image-preview": { inputPer1M: 2.00, outputPer1M: 120.00 },
+  // Nano Banana (gemini-2.5-flash-image)：$0.30 input / $30 output per 1M tokens（圖片 token）
+  "gemini-2.5-flash-image": { inputPer1M: 0.30, outputPer1M: 30.00 },
+}
+
+function estimateCost(model: string, inputTokens: number, outputTokens: number): number | null {
+  const pricing = MODEL_PRICING[model]
+  if (!pricing) return null
+  return (inputTokens / 1_000_000) * pricing.inputPer1M
+    + (outputTokens / 1_000_000) * pricing.outputPer1M
+}
+
+function formatCost(usd: number | null): string {
+  if (usd === null) return "—"
+  if (usd === 0) return "$0.00"
+  if (usd < 0.000001) return "<$0.000001"
+  // 顯示有效位數：小額保留更多小數位
+  if (usd < 0.01) return `$${usd.toFixed(6)}`
+  if (usd < 1) return `$${usd.toFixed(4)}`
+  return `$${usd.toFixed(2)}`
 }
 
 function formatTimestamp(ts: string): string {
@@ -60,22 +108,28 @@ type ModelSummary = {
   input_tokens: number
   output_tokens: number
   count: number
+  cost: number | null
 }
 
 function buildSummary(records: TokenUsageRecord[]): ModelSummary[] {
   const map = new Map<string, ModelSummary>()
   for (const r of records) {
     const existing = map.get(r.model)
+    const recordCost = estimateCost(r.model, r.input_tokens, r.output_tokens)
     if (existing) {
       existing.input_tokens += r.input_tokens
       existing.output_tokens += r.output_tokens
       existing.count += 1
+      if (recordCost !== null) {
+        existing.cost = (existing.cost ?? 0) + recordCost
+      }
     } else {
       map.set(r.model, {
         model: r.model,
         input_tokens: r.input_tokens,
         output_tokens: r.output_tokens,
         count: 1,
+        cost: recordCost,
       })
     }
   }
@@ -109,6 +163,10 @@ export function TokenUsagePage({ baseUrl }: Props) {
   const summary = buildSummary(records)
   const totalInput = records.reduce((s, r) => s + r.input_tokens, 0)
   const totalOutput = records.reduce((s, r) => s + r.output_tokens, 0)
+  const totalCost = summary.reduce<number | null>((acc, s) => {
+    if (s.cost === null) return acc
+    return (acc ?? 0) + s.cost
+  }, null)
 
   return (
     <div className="settings-page">
@@ -116,7 +174,8 @@ export function TokenUsagePage({ baseUrl }: Props) {
         <div className="settings-page-intro">
           <h2 className="settings-page-title">Token 用量</h2>
           <p className="settings-page-lead">
-            顯示各 Gemini API 呼叫的 Token 消耗記錄（僅 API key 模式有數據）。
+            顯示各 Gemini API 呼叫的 Token 消耗與估計費用（僅 API key 模式有數據）。
+            費用依 Google Gemini Developer API 付費方案標準定價估算，圖片模型的輸出以圖片 token 費率計算。
           </p>
         </div>
 
@@ -177,6 +236,7 @@ export function TokenUsagePage({ baseUrl }: Props) {
                     <th className="token-num">Input Token</th>
                     <th className="token-num">Output Token</th>
                     <th className="token-num">Total Token</th>
+                    <th className="token-num">估計費用 (USD)</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -187,6 +247,7 @@ export function TokenUsagePage({ baseUrl }: Props) {
                       <td className="token-num">{formatNum(s.input_tokens)}</td>
                       <td className="token-num">{formatNum(s.output_tokens)}</td>
                       <td className="token-num">{formatNum(s.input_tokens + s.output_tokens)}</td>
+                      <td className="token-num token-cost">{formatCost(s.cost)}</td>
                     </tr>
                   ))}
                 </tbody>
@@ -197,6 +258,7 @@ export function TokenUsagePage({ baseUrl }: Props) {
                     <td className="token-num">{formatNum(totalInput)}</td>
                     <td className="token-num">{formatNum(totalOutput)}</td>
                     <td className="token-num">{formatNum(totalInput + totalOutput)}</td>
+                    <td className="token-num token-cost">{formatCost(totalCost)}</td>
                   </tr>
                 </tfoot>
               </table>
@@ -221,6 +283,7 @@ export function TokenUsagePage({ baseUrl }: Props) {
                     <th>來源</th>
                     <th className="token-num">Input</th>
                     <th className="token-num">Output</th>
+                    <th className="token-num">費用 (USD)</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -231,6 +294,7 @@ export function TokenUsagePage({ baseUrl }: Props) {
                       <td className="token-source" title={r.source}>{sourceLabel(r.source)}</td>
                       <td className="token-num">{formatNum(r.input_tokens)}</td>
                       <td className="token-num">{formatNum(r.output_tokens)}</td>
+                      <td className="token-num token-cost">{formatCost(estimateCost(r.model, r.input_tokens, r.output_tokens))}</td>
                     </tr>
                   ))}
                 </tbody>
