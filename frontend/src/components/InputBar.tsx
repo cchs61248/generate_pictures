@@ -1,5 +1,9 @@
 import { useEffect, useId, useRef } from "react"
 
+const ALLOWED_DOC_EXTS = new Set([".txt", ".pdf", ".docx", ".doc", ".md"])
+
+type DocEntry = { serverFilename: string; originalName: string }
+
 type Props = {
   value: string
   onChange: (value: string) => void
@@ -28,6 +32,14 @@ type Props = {
   requireReferenceToSend?: boolean
   /** 與 requireReferenceToSend 搭配：後端已就緒（上傳成功或 session 已有參考圖） */
   referenceReady?: boolean
+  /** 已上傳的文件清單（最多 3 個） */
+  docUploads?: DocEntry[]
+  /** 新增一個文件 */
+  onAddDoc?: (file: File) => void
+  /** 移除指定文件（傳 serverFilename） */
+  onRemoveDoc?: (serverFilename: string) => void
+  /** 文件正在上傳中 */
+  uploadingDoc?: boolean
 }
 
 export function InputBar({
@@ -51,6 +63,10 @@ export function InputBar({
   requireTextToSend = false,
   requireReferenceToSend = false,
   referenceReady = true,
+  docUploads = [],
+  onAddDoc,
+  onRemoveDoc,
+  uploadingDoc = false,
 }: Props) {
   const thumbSrc =
     previewUrl ?? inputPreviewDataUrl ?? fallbackSamplePreviewUrl ?? null
@@ -58,14 +74,36 @@ export function InputBar({
   const showCompleted = taskCompleted && !isStreaming
   const displayText = showCompleted ? "任務完成" : value
   const inputId = useId()
+  const docInputId = useId()
   const fileRef = useRef<HTMLInputElement>(null)
+  const docFileRef = useRef<HTMLInputElement>(null)
 
   const handlePick = () => fileRef.current?.click()
+  const handleDocPick = () => docFileRef.current?.click()
 
   const handleFileInput = (e: React.ChangeEvent<HTMLInputElement>) => {
     const f = e.target.files?.[0]
     if (f) {
+      if (!f.type.startsWith("image/")) {
+        window.alert("請上傳圖片檔案（JPG、PNG、WebP 等），不支援此檔案格式。")
+        e.target.value = ""
+        return
+      }
       onFileChange(f)
+    }
+    e.target.value = ""
+  }
+
+  const handleDocInput = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const f = e.target.files?.[0]
+    if (f) {
+      const ext = f.name.slice(f.name.lastIndexOf(".")).toLowerCase()
+      if (!ALLOWED_DOC_EXTS.has(ext)) {
+        window.alert("請上傳 txt、pdf、docx 或 md 格式的文件。")
+        e.target.value = ""
+        return
+      }
+      onAddDoc?.(f)
     }
     e.target.value = ""
   }
@@ -83,9 +121,7 @@ export function InputBar({
     if (e.key === "Enter" && !e.shiftKey) {
       e.preventDefault()
       if (requireReferenceToSend && !referenceReady) {
-        window.alert(
-          "請先使用 📎 上傳一張商品圖片，成功後再送出。",
-        )
+        window.alert("請先使用左側圖片按鈕上傳一張商品圖片，成功後再送出。")
         return
       }
       if (!disabled && !uploading && !sendBlocked) onSend()
@@ -128,6 +164,7 @@ export function InputBar({
           </div>
         ) : null}
         <div className="input-row">
+          {/* 圖片上傳 hidden input */}
           <input
             ref={fileRef}
             id={inputId}
@@ -138,18 +175,47 @@ export function InputBar({
             aria-hidden={true}
             tabIndex={-1}
           />
+          {/* 文件上傳 hidden input */}
+          <input
+            ref={docFileRef}
+            id={docInputId}
+            type="file"
+            accept=".txt,.pdf,.docx,.doc,.md"
+            className="input-file-hidden"
+            onChange={handleDocInput}
+            aria-hidden={true}
+            tabIndex={-1}
+          />
+
+          {/* 圖片上傳按鈕 */}
           {lockImageThread ? null : (
             <button
               type="button"
               className="input-attach"
               onClick={handlePick}
               disabled={disabled || uploading || showCompleted}
-              title="上傳一張圖片（再次選取會覆蓋）"
+              title="上傳一張商品圖片（再次選取會覆蓋）"
               aria-label="上傳圖片"
             >
-              📎
+              <svg
+                xmlns="http://www.w3.org/2000/svg"
+                width="22"
+                height="22"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="1.8"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                aria-hidden="true"
+              >
+                <rect x="3" y="3" width="18" height="18" rx="2" ry="2" />
+                <circle cx="8.5" cy="8.5" r="1.5" />
+                <polyline points="21 15 16 10 5 21" />
+              </svg>
             </button>
           )}
+
           <textarea
             className="input-text"
             rows={2}
@@ -165,6 +231,41 @@ export function InputBar({
             onKeyDown={handleKeyDown}
             disabled={disabled || uploading || showCompleted}
           />
+
+          {/* 文件附加按鈕 */}
+          {lockImageThread ? null : (
+            <button
+              type="button"
+              className="input-attach input-attach--doc"
+              onClick={handleDocPick}
+              disabled={disabled || uploadingDoc || showCompleted}
+              title={`附加文件（txt/pdf/docx/md，最多 3 個，目前 ${docUploads.length}/3）`}
+              aria-label="附加文件"
+            >
+              <svg
+                xmlns="http://www.w3.org/2000/svg"
+                width="20"
+                height="20"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="1.8"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                aria-hidden="true"
+              >
+                <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
+                <polyline points="14 2 14 8 20 8" />
+                <line x1="16" y1="13" x2="8" y2="13" />
+                <line x1="16" y1="17" x2="8" y2="17" />
+                <polyline points="10 9 9 9 8 9" />
+              </svg>
+              {docUploads.length > 0 && (
+                <span className="input-attach-badge">{docUploads.length}</span>
+              )}
+            </button>
+          )}
+
           <button
             type="button"
             className={isStreaming ? "input-stop" : "input-send"}
@@ -179,11 +280,55 @@ export function InputBar({
             {isStreaming ? "停止" : "送出"}
           </button>
         </div>
+
+        {/* 圖片已選提示 */}
         {(file || uploadedFileName) && (
           <p className="input-meta">
             已選：{file?.name ?? uploadedFileName}
           </p>
         )}
+
+        {/* 文件 chip 列表 */}
+        {!lockImageThread && docUploads.length > 0 && (
+          <div className="input-doc-chips">
+            {docUploads.map((doc) => (
+              <span key={doc.serverFilename} className="input-doc-chip">
+                <svg
+                  xmlns="http://www.w3.org/2000/svg"
+                  width="13"
+                  height="13"
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth="2"
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  aria-hidden="true"
+                >
+                  <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
+                  <polyline points="14 2 14 8 20 8" />
+                </svg>
+                <span className="input-doc-chip-name" title={doc.originalName}>
+                  {doc.originalName}
+                </span>
+                <button
+                  type="button"
+                  className="input-doc-chip-remove"
+                  onClick={() => onRemoveDoc?.(doc.serverFilename)}
+                  aria-label={`移除文件 ${doc.originalName}`}
+                >
+                  ×
+                </button>
+              </span>
+            ))}
+            {uploadingDoc && (
+              <span className="input-doc-chip input-doc-chip--uploading">
+                上傳中…
+              </span>
+            )}
+          </div>
+        )}
+
         {showReferenceMissingWarning ? (
           <p className="input-meta input-meta--warn">此子串參考圖遺失</p>
         ) : null}

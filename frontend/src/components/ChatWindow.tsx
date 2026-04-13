@@ -185,7 +185,7 @@ export function ChatWindow({
                 <p className="chat-empty-hint">
                   {tool
                     ? tool.description
-                    : "請先上傳一張商品圖（📎），輸入問題後送出。產生的圖會顯示在對話中。"}
+                    : "請先上傳一張商品圖，輸入問題後送出。產生的圖會顯示在對話中。"}
                 </p>
               </div>
             )

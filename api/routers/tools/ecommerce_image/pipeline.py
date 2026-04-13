@@ -24,6 +24,7 @@ from api.routers.tools.ecommerce_image.utils.json_utils import validate_output
 async def run_pipeline(
     config: AppConfig,
     user_input: str | None = None,
+    doc_texts: list[str] | None = None,
     progress: ProgressBus | None = None,
 ) -> dict:
     require_text_client = not config.stage3_only_mode
@@ -56,6 +57,7 @@ async def run_pipeline(
             genai_client=clients.genai_client,
             gemini_client=clients.gemini_client,
             use_webapi=config.use_webapi,
+            doc_texts=doc_texts or [],
             progress=progress,
         )
         final_data = await generate_json_plan(

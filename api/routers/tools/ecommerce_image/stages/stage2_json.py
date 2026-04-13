@@ -93,6 +93,19 @@ async def generate_json_plan(
 {gathered_info}
 """
 
+    print("\n" + "=" * 72)
+    print("[LLM prompt] stage2_json · user message text (plus one product image)")
+    print("=" * 72)
+    print(format_prompt.strip())
+    print("=" * 72)
+    if not use_webapi:
+        print("[LLM prompt] stage2_json · system_instruction (API key path only)")
+        print("=" * 72)
+        print(prompt_template.strip())
+        print("=" * 72 + "\n")
+    else:
+        print()
+
     if use_webapi:
         response = await gemini_client.generate_content(
             format_prompt,

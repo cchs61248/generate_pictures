@@ -11,6 +11,8 @@ import {
   type ChatMessage,
   consumeImageThreadStream,
   consumeRunStream,
+  deleteSessionDocument,
+  deleteSessionDocuments,
   deleteSessionUpload,
   deleteSessionUploadImage,
   fetchSessionState,
@@ -18,6 +20,7 @@ import {
   imageUrlsFromSavedFiles,
   initImageThread,
   saveSessionState,
+  uploadDocument,
   uploadImage,
 } from "./api"
 import {
@@ -129,6 +132,8 @@ function mergeSessionLists(
   return merged
 }
 
+type DocEntry = { serverFilename: string; originalName: string }
+
 type SessionComposerState = {
   inputText: string
   file: File | null
@@ -137,6 +142,7 @@ type SessionComposerState = {
   inputPreviewActive: boolean
   serverReady: boolean
   samplePreviewEpoch: number
+  docUploads: DocEntry[]
 }
 
 function emptyComposerState(): SessionComposerState {
@@ -148,6 +154,7 @@ function emptyComposerState(): SessionComposerState {
     inputPreviewActive: false,
     serverReady: false,
     samplePreviewEpoch: 0,
+    docUploads: [],
   }
 }
 
@@ -289,6 +296,8 @@ export default function App() {
   const [inputPreviewActive, setInputPreviewActive] = useState(false)
   const [samplePreviewEpoch, setSamplePreviewEpoch] = useState(0)
   const [serverReady, setServerReady] = useState(false)
+  const [docUploads, setDocUploads] = useState<DocEntry[]>([])
+  const [uploadingDoc, setUploadingDoc] = useState(false)
   const [, setThreadReferenceMissing] = useState(false)
   const [hydratedFromServer, setHydratedFromServer] = useState(false)
   const sessionVersionRef = useRef(0)
@@ -349,9 +358,11 @@ export default function App() {
         inputPreviewActive,
         serverReady,
         samplePreviewEpoch,
+        docUploads,
       }
     },
     [
+      docUploads,
       file,
       inputAssetSessionId,
       inputPreviewActive,
@@ -388,6 +399,7 @@ export default function App() {
     setInputPreviewActive(resolvedPreviewActive)
     setServerReady(resolvedServerReady)
     setSamplePreviewEpoch(snap.samplePreviewEpoch)
+    setDocUploads(snap.docUploads ?? [])
     if (
       snap.file ||
       resolvedUploadedName ||
@@ -429,12 +441,14 @@ export default function App() {
   }, [])
 
   useEffect(() => {
-    if (!APP_BOOT.sessionIdsToDeleteUpload.length) return
+    const ids = APP_BOOT.sessionIdsToDeleteUpload
+    if (!ids.length) return
     const seen = new Set<string>()
-    for (const id of APP_BOOT.sessionIdsToDeleteUpload) {
+    for (const id of ids) {
       if (seen.has(id)) continue
       seen.add(id)
       void deleteSessionUploadImage(id, baseUrl).catch(() => {})
+      void deleteSessionDocuments(id, baseUrl).catch(() => {})
     }
   }, [baseUrl])
 
@@ -818,6 +832,7 @@ export default function App() {
     setInputPreviewDataUrl(null)
     setInputPreviewActive(false)
     setServerReady(false)
+    setDocUploads([])
   }, [])
 
   useEffect(() => {
@@ -980,6 +995,11 @@ export default function App() {
         return
       }
 
+      if (!next.type.startsWith("image/")) {
+        window.alert("請上傳圖片檔案（JPG、PNG、WebP 等），不支援此檔案格式。")
+        return
+      }
+
       const detached = await cloneFileDetached(next)
       setInputPreviewDataUrl(null)
       setInputPreviewActive(false)
@@ -1039,21 +1059,12 @@ export default function App() {
           serverReady: false,
           samplePreviewEpoch: 0,
         }
-        patchActiveMessages((m) => [
-          ...m,
-          {
-            id: newId(),
-            role: "assistant",
-            text: `圖片上傳失敗：${msg}`,
-            error: true,
-          },
-        ])
-        setServerReady(false)
         patchActiveSession((s) => ({
           ...s,
           referenceImageName: undefined,
           updatedAt: Date.now(),
         }))
+        window.alert(msg || "請上傳有效的圖片檔案（JPG、PNG、WebP 等）。")
       } finally {
         setUploading(false)
       }
@@ -1066,6 +1077,64 @@ export default function App() {
       samplePreviewEpoch,
       taskCompleted,
     ],
+  )
+
+  const handleAddDoc = useCallback(
+    async (docFile: File) => {
+      if (taskCompleted || imageThreadLocked) return
+
+      setUploadingDoc(true)
+      try {
+        let nextUploads = [...docUploads]
+        // 若已有 3 個，刪除最舊的
+        if (nextUploads.length >= 3) {
+          const oldest = nextUploads[0]
+          void deleteSessionDocument(activeId, oldest.serverFilename, baseUrl).catch(() => {})
+          nextUploads = nextUploads.slice(1)
+        }
+
+        const result = await uploadDocument(docFile, baseUrl, activeId)
+        const newEntry: DocEntry = {
+          serverFilename: result.filename,
+          originalName: docFile.name,
+        }
+        nextUploads = [...nextUploads, newEntry]
+        setDocUploads(nextUploads)
+        composerBySessionRef.current[activeId] = {
+          ...(composerBySessionRef.current[activeId] ?? emptyComposerState()),
+          docUploads: nextUploads,
+        }
+        patchActiveSession((s) => ({
+          ...s,
+          docFileNames: nextUploads,
+          updatedAt: Date.now(),
+        }))
+      } catch (e) {
+        const msg = e instanceof Error ? e.message : String(e)
+        window.alert(msg || "文件上傳失敗，請稍後再試。")
+      } finally {
+        setUploadingDoc(false)
+      }
+    },
+    [activeId, baseUrl, docUploads, imageThreadLocked, patchActiveSession, taskCompleted],
+  )
+
+  const handleRemoveDoc = useCallback(
+    (serverFilename: string) => {
+      void deleteSessionDocument(activeId, serverFilename, baseUrl).catch(() => {})
+      const nextUploads = docUploads.filter((d) => d.serverFilename !== serverFilename)
+      setDocUploads(nextUploads)
+      composerBySessionRef.current[activeId] = {
+        ...(composerBySessionRef.current[activeId] ?? emptyComposerState()),
+        docUploads: nextUploads,
+      }
+      patchActiveSession((s) => ({
+        ...s,
+        docFileNames: nextUploads,
+        updatedAt: Date.now(),
+      }))
+    },
+    [activeId, baseUrl, docUploads, patchActiveSession],
   )
 
   const handleSend = useCallback(async () => {
@@ -1190,7 +1259,7 @@ export default function App() {
 
     // 一般 session（主 session）原有邏輯（送出鈕應已禁用；此為保險）
     if (!serverReady) {
-      window.alert("請先使用 📎 上傳一張商品圖片，成功後再送出。")
+      window.alert("請先使用左側圖片按鈕上傳一張商品圖片，成功後再送出。")
       return
     }
 
@@ -1212,6 +1281,11 @@ export default function App() {
       imageSnapshot = inputPreviewDataUrl
     }
 
+    const docSnapshot = docUploads.map((d) => ({
+      originalName: d.originalName,
+      serverFilename: d.serverFilename,
+    }))
+
     if (clearOnNextSend) {
       patchActiveMessages(() => [])
       patchActiveSession((s) => ({
@@ -1224,8 +1298,16 @@ export default function App() {
     const userMsg: ChatMessage = {
       id: newId(),
       role: "user",
-      text: text || "（僅圖片）",
+      text:
+        text ||
+        (docSnapshot.length > 0
+          ? imageSnapshot
+            ? "（已送出商品圖與附件）"
+            : "（已送出附件）"
+          : "（僅圖片）"),
       imagePreview: imageSnapshot,
+      attachedDocuments:
+        docSnapshot.length > 0 ? docSnapshot : undefined,
     }
     patchActiveMessages((m) => [...m, userMsg])
     setInputText("")
@@ -1239,6 +1321,7 @@ export default function App() {
     setInputPreviewDataUrl(null)
     setInputPreviewActive(false)
     setServerReady(false)
+    setDocUploads([])
     composerBySessionRef.current[activeId] = {
       ...(composerBySessionRef.current[activeId] ?? emptyComposerState()),
       file: null,
@@ -1247,10 +1330,12 @@ export default function App() {
       inputPreviewActive: false,
       serverReady: false,
       samplePreviewEpoch: 0,
+      docUploads: [],
     }
     patchActiveSession((s) => ({
       ...s,
       referenceImageName: undefined,
+      docFileNames: [],
       updatedAt: Date.now(),
     }))
 
@@ -1398,6 +1483,7 @@ export default function App() {
     activeId,
     activeSession?.title,
     baseUrl,
+    docUploads,
     file,
     inputPreviewDataUrl,
     serverReady,
@@ -1671,6 +1757,10 @@ export default function App() {
                   requireTextToSend={imageThreadLocked}
                   requireReferenceToSend={!imageThreadLocked}
                   referenceReady={serverReady}
+                  docUploads={imageThreadLocked ? [] : docUploads}
+                  onAddDoc={imageThreadLocked ? undefined : handleAddDoc}
+                  onRemoveDoc={imageThreadLocked ? undefined : handleRemoveDoc}
+                  uploadingDoc={uploadingDoc}
                 />
               </>
             )}

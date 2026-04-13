@@ -72,6 +72,15 @@ async def generate_all_images(
         safe_name = build_safe_name(main_name)
         group_id = f"stage3_p{sort_num:02d}"
 
+        print("\n" + "=" * 72)
+        print(
+            f"[LLM prompt] stage3_image · P{sort_num:02d} {main_name} "
+            "(plus reference product image)"
+        )
+        print("=" * 72)
+        print(image_prompt.strip())
+        print("=" * 72)
+
         # 讓前端每張圖一個獨立泡泡（可摺疊工作紀錄）
         title = f"🎨 [P{sort_num:02d}] 正在生成：{main_name}..."
         print(f"\n{title}")

@@ -51,6 +51,7 @@ export function normalizePendingSession(raw: unknown): ChatSession | null {
     toolId: p.toolId,
     imageThreadLocked: p.imageThreadLocked,
     referenceImageName: p.referenceImageName,
+    docFileNames: Array.isArray(p.docFileNames) ? p.docFileNames : undefined,
     threadSourceKey: p.threadSourceKey,
   }
 }
@@ -71,21 +72,37 @@ export function resolvePersistedMainView(
 export function prepareLocalStorageAfterFullPageReload(): {
   persisted: PersistedState | null
   sessionIdsToDeleteUpload: string[]
+  sessionIdsToDeleteDocs: string[]
 } {
   const persisted = loadPersistedState()
   if (!persisted) {
-    return { persisted: null, sessionIdsToDeleteUpload: [] }
+    return { persisted: null, sessionIdsToDeleteUpload: [], sessionIdsToDeleteDocs: [] }
   }
-  const sessionIdsToDeleteUpload: string[] = []
-  const sessions = persisted.sessions.map((s) => {
-    if (!s.referenceImageName) return s
-    sessionIdsToDeleteUpload.push(s.id)
-    return { ...s, referenceImageName: undefined }
-  })
+
+  const idSet = new Set<string>()
+  for (const s of persisted.sessions) {
+    if (s.id) idSet.add(s.id)
+  }
+  if (persisted.pendingToolSession?.id) {
+    idSet.add(persisted.pendingToolSession.id)
+  }
+  if (persisted.activeId) {
+    idSet.add(persisted.activeId)
+  }
+  const purgeIds = [...idSet]
+
+  const sessions = persisted.sessions.map((s) => ({
+    ...s,
+    referenceImageName: undefined,
+    docFileNames: [],
+  }))
   let nextPending = persisted.pendingToolSession
-  if (nextPending?.referenceImageName) {
-    sessionIdsToDeleteUpload.push(nextPending.id)
-    nextPending = { ...nextPending, referenceImageName: undefined }
+  if (nextPending) {
+    nextPending = {
+      ...nextPending,
+      referenceImageName: undefined,
+      docFileNames: [],
+    }
   }
   const next: PersistedState = {
     ...persisted,
@@ -93,7 +110,11 @@ export function prepareLocalStorageAfterFullPageReload(): {
     pendingToolSession: nextPending,
   }
   savePersistedState(next)
-  return { persisted: next, sessionIdsToDeleteUpload }
+  return {
+    persisted: next,
+    sessionIdsToDeleteUpload: purgeIds,
+    sessionIdsToDeleteDocs: purgeIds,
+  }
 }
 
 export function loadPersistedState(): PersistedState | null {

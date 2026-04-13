@@ -7,3 +7,5 @@ rembg[cpu]==2.0.74
 fastapi==0.116.1
 uvicorn==0.35.0
 python-multipart==0.0.20
+pypdf>=5.0.0
+python-docx>=1.1.0

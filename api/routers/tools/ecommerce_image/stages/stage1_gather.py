@@ -55,6 +55,7 @@ async def gather_product_info(
     genai_client,
     gemini_client,
     use_webapi: bool,
+    doc_texts: list[str] | None = None,
     progress: ProgressBus | None = None,
 ) -> str:
     ctx_token = None
@@ -87,10 +88,22 @@ async def gather_product_info(
     else:
         url_mandatory_block = "【網址規則】若使用者訊息中出現 http(s) 網址，必須先呼叫 fetch_webpage 工具取得實際內容，禁止推測頁面內容。"
 
+    doc_block = ""
+    if doc_texts:
+        doc_sections = []
+        for i, text in enumerate(doc_texts, 1):
+            doc_sections.append(f"--- 文件 {i} ---\n{text}")
+        doc_block = (
+            "\n【使用者附件文件內容】\n"
+            "以下為使用者提供的文件，請將其內容納入分析，優先作為商品資訊的補充參考：\n\n"
+            + "\n\n".join(doc_sections)
+            + "\n"
+        )
+
     info_prompt = f"""
 請仔細分析我上傳的商品圖片，並結合以下用戶提供的文字或網址資訊：
 「{user_input}」
-{url_mandatory_block}
+{doc_block}{url_mandatory_block}
 請主動搜尋相關資料，依照以下結構逐項整理，這些資訊將直接用於後續生成 9 張電商商品圖的 AI 繪圖提示詞（P1～P9）：
 
 【基本資訊】
@@ -135,6 +148,12 @@ async def gather_product_info(
 
 請盡可能查詢最新且準確的台灣在地資訊，若搜尋不到特定資料請標注「待確認」。
 """
+
+    print("\n" + "=" * 72)
+    print("[LLM prompt] stage1_gather · user text (plus one product image in request)")
+    print("=" * 72)
+    print(info_prompt.strip())
+    print("=" * 72 + "\n")
 
     try:
         if use_webapi:

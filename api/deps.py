@@ -88,6 +88,34 @@ def apply_session_sample_path(config, session_id: str | None):
     return config
 
 
+def doc_upload_path(root: str, sid: str, filename: str) -> str:
+    """回傳文件檔案的儲存路徑：uploads/<sid>_doc_<filename>。"""
+    uploads_dir = os.path.join(root, "uploads")
+    os.makedirs(uploads_dir, exist_ok=True)
+    safe_name = os.path.basename(filename)
+    return os.path.join(uploads_dir, f"{sid}_doc_{safe_name}")
+
+
+def load_session_document_texts(root: str, sid: str | None) -> list[str]:
+    """掃描 uploads/<sid>_doc_* 並抽取文字，回傳非空字串清單。"""
+    if not sid:
+        return []
+    from services.document_reader import extract_text
+
+    uploads_dir = os.path.join(root, "uploads")
+    if not os.path.isdir(uploads_dir):
+        return []
+
+    prefix = f"{sid}_doc_"
+    texts: list[str] = []
+    for fname in sorted(os.listdir(uploads_dir)):
+        if fname.startswith(prefix):
+            text = extract_text(os.path.join(uploads_dir, fname))
+            if text.strip():
+                texts.append(text)
+    return texts
+
+
 def safe_filename_part(text: str, max_len: int = 40) -> str:
     """將任意字串轉成適合作為檔名的安全片段。"""
     safe = re.sub(r'[\\/:*?"<>|\s]+', "_", text.strip())

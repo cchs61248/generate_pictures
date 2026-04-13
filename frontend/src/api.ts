@@ -23,6 +23,7 @@ export type ChatMessage = {
   collapsible?: CollapsibleBlock
   /** 使用者訊息附圖（建議 data URL，避免 blob 被 revoke 後歷史訊息破圖） */
   imagePreview?: string
+  attachedDocuments?: { originalName: string; serverFilename?: string }[]
   /** 產生圖在後端的 URL（GET /images/...） */
   generatedImages?: string[]
   /** 是否為錯誤訊息 */
@@ -85,6 +86,57 @@ export async function deleteSessionUploadImage(
     const body = await safeJson(res)
     const detail = extractDetail(body)
     throw new Error(detail || `刪除上傳圖檔失敗 (${res.status})`)
+  }
+}
+
+export async function uploadDocument(
+  file: File,
+  baseUrl: string,
+  sessionId: string,
+): Promise<{ ok: boolean; filename: string }> {
+  const form = new FormData()
+  form.append("file", file)
+  form.append("session_id", sessionId)
+  const res = await fetch(`${trimSlash(baseUrl)}/upload-document`, {
+    method: "POST",
+    body: form,
+  })
+  if (!res.ok) {
+    const body = await safeJson(res)
+    const detail = extractDetail(body)
+    throw new Error(detail || `文件上傳失敗 (${res.status})`)
+  }
+  return res.json() as Promise<{ ok: boolean; filename: string }>
+}
+
+export async function deleteSessionDocument(
+  sessionId: string,
+  filename: string,
+  baseUrl: string,
+): Promise<void> {
+  const res = await fetch(
+    `${trimSlash(baseUrl)}/session-upload/${encodeURIComponent(sessionId)}/document/${encodeURIComponent(filename)}`,
+    { method: "DELETE" },
+  )
+  if (!res.ok) {
+    const body = await safeJson(res)
+    const detail = extractDetail(body)
+    throw new Error(detail || `刪除文件失敗 (${res.status})`)
+  }
+}
+
+export async function deleteSessionDocuments(
+  sessionId: string,
+  baseUrl: string,
+): Promise<void> {
+  const res = await fetch(
+    `${trimSlash(baseUrl)}/session-upload/${encodeURIComponent(sessionId)}/documents`,
+    { method: "DELETE" },
+  )
+  if (!res.ok) {
+    const body = await safeJson(res)
+    const detail = extractDetail(body)
+    throw new Error(detail || `刪除文件失敗 (${res.status})`)
   }
 }
 

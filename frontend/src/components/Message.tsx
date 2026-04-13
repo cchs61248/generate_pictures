@@ -16,6 +16,8 @@ export function MessageBubble({ message, onOpenImageThread }: Props) {
 
   if (isUser) {
     const hasImage = Boolean(message.imagePreview)
+    const docs = message.attachedDocuments ?? []
+    const hasDocs = docs.length > 0
     const hasText = Boolean(message.text)
 
     return (
@@ -32,6 +34,36 @@ export function MessageBubble({ message, onOpenImageThread }: Props) {
                   decoding="async"
                 />
               </div>
+            </div>
+          ) : null}
+          {hasDocs ? (
+            <div className="msg-bubble msg-bubble--user msg-bubble--user-docs">
+              <p className="msg-user-docs-title">附件</p>
+              <ul className="msg-user-doc-list">
+                {docs.map((d, i) => (
+                  <li key={`${d.serverFilename ?? d.originalName}-${i}`} className="msg-user-doc-item">
+                    <svg
+                      xmlns="http://www.w3.org/2000/svg"
+                      width="14"
+                      height="14"
+                      viewBox="0 0 24 24"
+                      fill="none"
+                      stroke="currentColor"
+                      strokeWidth="2"
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                      className="msg-user-doc-icon"
+                      aria-hidden
+                    >
+                      <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
+                      <polyline points="14 2 14 8 20 8" />
+                    </svg>
+                    <span className="msg-user-doc-name" title={d.originalName}>
+                      {d.originalName}
+                    </span>
+                  </li>
+                ))}
+              </ul>
             </div>
           ) : null}
           {hasText ? (

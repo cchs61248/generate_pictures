@@ -26,6 +26,8 @@ export type ChatSession = {
   referenceImageName?: string
   /** 子討論串來源鍵（同一主 session + 同一泡泡圖片只建立一次） */
   threadSourceKey?: string
+  /** 已上傳的附件文件清單（最多 3 個），重新整理後清除 */
+  docFileNames?: { serverFilename: string; originalName: string }[]
 }
 
 export const DEFAULT_SESSION_TITLE = "AI 電商圖文助手"
