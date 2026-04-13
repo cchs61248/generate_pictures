@@ -23,6 +23,7 @@ import {
 import {
   loadPersistedState,
   normalizePendingSession,
+  prepareLocalStorageAfterFullPageReload,
   resolvePersistedMainView,
   savePersistedState,
   type PersistedState,
@@ -155,13 +156,12 @@ function createDefaultTemporaryToolSession(): ChatSession {
   return createSession(defaultToolId)
 }
 
-function initialState(): {
+function computeInitialState(persisted: PersistedState | null): {
   sessions: ChatSession[]
   activeId: string
   pendingToolSession: ChatSession | null
   mainView: "chat" | "settings" | "token_usage"
 } {
-  const persisted = loadPersistedState()
   const mainView = resolvePersistedMainView(persisted)
   const pending = persisted
     ? normalizePendingSession(persisted.pendingToolSession)
@@ -202,6 +202,27 @@ function initialState(): {
   const temp = createDefaultTemporaryToolSession()
   return { sessions: [], activeId: temp.id, pendingToolSession: temp, mainView }
 }
+
+/** 重新整理後已刪除 uploads 的 session：與後端合併時勿還原 referenceImageName */
+function stripReferenceForPurgedSessions(
+  sessions: ChatSession[],
+  purgeIds: Set<string>,
+): ChatSession[] {
+  if (!purgeIds.size) return sessions
+  return sessions.map((s) =>
+    purgeIds.has(s.id) ? { ...s, referenceImageName: undefined } : s,
+  )
+}
+
+const APP_BOOT = (() => {
+  const prep = prepareLocalStorageAfterFullPageReload()
+  return {
+    ...computeInitialState(prep.persisted),
+    sessionIdsToDeleteUpload: prep.sessionIdsToDeleteUpload,
+  }
+})()
+
+const REFERENCE_PURGE_ID_SET = new Set(APP_BOOT.sessionIdsToDeleteUpload)
 
 function normalizeIncomingState(incoming: PersistedState): {
   sessions: ChatSession[]
@@ -245,11 +266,10 @@ async function cloneFileDetached(file: File): Promise<File> {
 }
 
 export default function App() {
-  const boot = initialState()
   const baseUrl = getApiBaseUrl()
   const [{ sessions, activeId }, setBoth] = useState(() => ({
-    sessions: boot.sessions,
-    activeId: boot.activeId,
+    sessions: APP_BOOT.sessions,
+    activeId: APP_BOOT.activeId,
   }))
   const [inputText, setInputText] = useState("")
   const [file, setFile] = useState<File | null>(null)
@@ -294,14 +314,14 @@ export default function App() {
     typeof window !== "undefined" ? window.innerWidth > 900 : true,
   )
   const [mainView, setMainView] = useState<"chat" | "settings" | "token_usage">(
-    () => boot.mainView,
+    () => APP_BOOT.mainView,
   )
   /**
    * 點擊工具後建立的「暫存對話」，尚未加入 sessions。
    * 送出第一筆訊息時才正式 commit 進 sessions。
    */
   const [pendingToolSession, setPendingToolSession] = useState<ChatSession | null>(
-    () => boot.pendingToolSession,
+    () => APP_BOOT.pendingToolSession,
   )
   const [uiScroll, setUiScroll] = useState<PersistedUiScroll>(
     () => loadPersistedState()?.uiScroll ?? {},
@@ -409,6 +429,16 @@ export default function App() {
   }, [])
 
   useEffect(() => {
+    if (!APP_BOOT.sessionIdsToDeleteUpload.length) return
+    const seen = new Set<string>()
+    for (const id of APP_BOOT.sessionIdsToDeleteUpload) {
+      if (seen.has(id)) continue
+      seen.add(id)
+      void deleteSessionUploadImage(id, baseUrl).catch(() => {})
+    }
+  }, [baseUrl])
+
+  useEffect(() => {
     let cancelled = false
     void (async () => {
       try {
@@ -427,10 +457,13 @@ export default function App() {
           if (!remoteSessions.length) return prev
           sessionVersionRef.current = remote.version
           const tombstones = new Set(deletedIdsRef.current)
-          const mergedSessions = mergeSessionLists(
-            prev.sessions,
-            remoteSessions,
-            tombstones,
+          const mergedSessions = stripReferenceForPurgedSessions(
+            mergeSessionLists(
+              prev.sessions,
+              remoteSessions,
+              tombstones,
+            ),
+            REFERENCE_PURGE_ID_SET,
           )
           // 若使用者已開啟「尚未 commit」的暫存對話，不要用遠端 activeId 覆蓋
           const pend = pendingToolSessionRef.current
@@ -519,10 +552,13 @@ export default function App() {
           const remoteSessions = (remote.sessions as ChatSession[]).filter(
             (s) => !tombstones.has(s.id),
           )
-          const mergedSessions = mergeSessionLists(
-            localSessions,
-            remoteSessions,
-            tombstones,
+          const mergedSessions = stripReferenceForPurgedSessions(
+            mergeSessionLists(
+              localSessions,
+              remoteSessions,
+              tombstones,
+            ),
+            REFERENCE_PURGE_ID_SET,
           )
 
           // 決定 activeId（暫存對話不在 mergedSessions 內，必須保留）

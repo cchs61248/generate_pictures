@@ -64,6 +64,38 @@ export function resolvePersistedMainView(
   return "chat"
 }
 
+/**
+ * 完整重新載入時：自 localStorage 清除 referenceImageName，
+ * 並向後端請求刪除 uploads/<session_id>.jpg 的 session id 列表。
+ */
+export function prepareLocalStorageAfterFullPageReload(): {
+  persisted: PersistedState | null
+  sessionIdsToDeleteUpload: string[]
+} {
+  const persisted = loadPersistedState()
+  if (!persisted) {
+    return { persisted: null, sessionIdsToDeleteUpload: [] }
+  }
+  const sessionIdsToDeleteUpload: string[] = []
+  const sessions = persisted.sessions.map((s) => {
+    if (!s.referenceImageName) return s
+    sessionIdsToDeleteUpload.push(s.id)
+    return { ...s, referenceImageName: undefined }
+  })
+  let nextPending = persisted.pendingToolSession
+  if (nextPending?.referenceImageName) {
+    sessionIdsToDeleteUpload.push(nextPending.id)
+    nextPending = { ...nextPending, referenceImageName: undefined }
+  }
+  const next: PersistedState = {
+    ...persisted,
+    sessions,
+    pendingToolSession: nextPending,
+  }
+  savePersistedState(next)
+  return { persisted: next, sessionIdsToDeleteUpload }
+}
+
 export function loadPersistedState(): PersistedState | null {
   try {
     const raw = localStorage.getItem(STORAGE_KEY)
