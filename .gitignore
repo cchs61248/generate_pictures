@@ -64,3 +64,5 @@ template_json/
 data/session_state.json
 /final_output.json
 /data
+/.playwright-mcp
+cookies.json
