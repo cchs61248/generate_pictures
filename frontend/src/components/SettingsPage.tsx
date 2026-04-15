@@ -575,8 +575,13 @@ export function SettingsPage({
               <button
                 type="button"
                 className="settings-save"
-                disabled={styleBusy}
+                disabled={styleBusy || (styleStatus?.queue_pending_total ?? 0) <= 0}
                 onClick={() => void handleExtract()}
+                title={
+                  (styleStatus?.queue_pending_total ?? 0) <= 0
+                    ? "目前沒有待萃取資料"
+                    : undefined
+                }
               >
                 {styleBusy ? "處理中…" : "手動執行萃取"}
               </button>
