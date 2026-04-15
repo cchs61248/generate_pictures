@@ -12,7 +12,7 @@ from fastapi import APIRouter, HTTPException, Request
 
 from api.deps import (
     apply_session_sample_path,
-    load_session_document_texts,
+    load_session_documents,
     project_root,
     readable_error,
     require_session_upload_exists,
@@ -38,13 +38,16 @@ async def run_generation(payload: dict):
     require_session_upload_exists(session_id)
     config = parse_config(stage3_only_flag=stage3_only)
     config = apply_session_sample_path(config, session_id)
-    doc_texts = load_session_document_texts(root, config.session_id or session_id)
+    docs = load_session_documents(root, config.session_id or session_id)
+    doc_texts = [d["text"] for d in docs]
+    doc_filenames = [d["filename"] for d in docs]
 
     try:
         result = await run_pipeline(
             config=config,
             user_input=user_input,
             doc_texts=doc_texts,
+            doc_filenames=doc_filenames,
             selected_style_profile_id=selected_style_profile_id,
         )
         return {
@@ -69,7 +72,9 @@ async def run_generation_stream(payload: dict, request: Request):
     require_session_upload_exists(session_id)
     config = parse_config(stage3_only_flag=stage3_only)
     config = apply_session_sample_path(config, session_id)
-    doc_texts = load_session_document_texts(root, config.session_id or session_id)
+    docs = load_session_documents(root, config.session_id or session_id)
+    doc_texts = [d["text"] for d in docs]
+    doc_filenames = [d["filename"] for d in docs]
 
     async def runner(queue: asyncio.Queue):
         loop = asyncio.get_running_loop()
@@ -79,6 +84,7 @@ async def run_generation_stream(payload: dict, request: Request):
                 config=config,
                 user_input=user_input,
                 doc_texts=doc_texts,
+                doc_filenames=doc_filenames,
                 progress=bus,
                 selected_style_profile_id=selected_style_profile_id,
             )

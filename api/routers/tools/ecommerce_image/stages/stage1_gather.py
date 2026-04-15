@@ -9,6 +9,8 @@ import re
 
 from google.genai import types
 
+from api.deps import project_root
+from api.routers.tools.ecommerce_image.services.style_learning import get_style_prompt_by_id
 from core.config import get_text_model
 from core.progress import GROUP_STAGE1_TOOLS, ProgressBus, progress_cv
 from core.token_logger import log_token_usage
@@ -56,7 +58,9 @@ async def gather_product_info(
     gemini_client,
     use_webapi: bool,
     doc_texts: list[str] | None = None,
+    doc_filenames: list[str] | None = None,
     progress: ProgressBus | None = None,
+    selected_style_profile_id: str | None = None,
 ) -> str:
     ctx_token = None
     if progress:
@@ -94,9 +98,26 @@ async def gather_product_info(
             "【網址規則】若使用者訊息中出現 http(s) 網址，必須先呼叫 fetch_webpage 工具取得實際內容，禁止推測頁面內容。\n"
             "禁止在未瀏覽前推測該網址上的規格或文案。\n"
         )
+    style_prompt = get_style_prompt_by_id(
+        root=project_root(),
+        selected_profile_id=selected_style_profile_id,
+    )
+    stage1_system_instruction = url_mandatory_block + (style_prompt or "")
 
     doc_block = ""
     if doc_texts:
+        names = doc_filenames or []
+        for i, _ in enumerate(doc_texts, 1):
+            filename = names[i - 1] if i - 1 < len(names) else f"文件_{i}"
+            line = f"👉 [系統提示] 已讀取附件文件: {filename}"
+            if progress:
+                await progress.emit(
+                    {
+                        "type": "collapsible_line",
+                        "group_id": GROUP_STAGE1_TOOLS,
+                        "line": line,
+                    }
+                )
         doc_sections = []
         for i, text in enumerate(doc_texts, 1):
             doc_sections.append(f"--- 文件 {i} ---\n{text}")
@@ -165,7 +186,7 @@ async def gather_product_info(
     try:
         if use_webapi:
             response = await gemini_client.generate_content(
-                url_mandatory_block + "\n\n" + info_prompt,
+                stage1_system_instruction + "\n\n" + info_prompt,
                 model="gemini-3-flash-thinking",
                 files=[image_path],
             )
@@ -176,7 +197,7 @@ async def gather_product_info(
                 model=get_text_model(),
                 config=types.GenerateContentConfig(
                     tools=[bounded_search, fetch_webpage],
-                    system_instruction=url_mandatory_block,
+                    system_instruction=stage1_system_instruction,
                     automatic_function_calling=types.AutomaticFunctionCallingConfig(
                         disable=False,
                         # 搜尋最多 get_max_llm_search_calls() 次（見 make_bounded_search_web）；其餘額度給 fetch_webpage

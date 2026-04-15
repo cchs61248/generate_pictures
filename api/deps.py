@@ -116,6 +116,26 @@ def load_session_document_texts(root: str, sid: str | None) -> list[str]:
     return texts
 
 
+def load_session_documents(root: str, sid: str | None) -> list[dict[str, str]]:
+    """掃描 uploads/<sid>_doc_*，回傳含檔名與文字的文件資訊清單。"""
+    if not sid:
+        return []
+    from services.document_reader import extract_text
+
+    uploads_dir = os.path.join(root, "uploads")
+    if not os.path.isdir(uploads_dir):
+        return []
+
+    prefix = f"{sid}_doc_"
+    docs: list[dict[str, str]] = []
+    for fname in sorted(os.listdir(uploads_dir)):
+        if fname.startswith(prefix):
+            text = extract_text(os.path.join(uploads_dir, fname))
+            if text.strip():
+                docs.append({"filename": fname, "text": text})
+    return docs
+
+
 def safe_filename_part(text: str, max_len: int = 40) -> str:
     """將任意字串轉成適合作為檔名的安全片段。"""
     safe = re.sub(r'[\\/:*?"<>|\s]+', "_", text.strip())

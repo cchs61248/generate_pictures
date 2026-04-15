@@ -25,6 +25,7 @@ async def run_pipeline(
     config: AppConfig,
     user_input: str | None = None,
     doc_texts: list[str] | None = None,
+    doc_filenames: list[str] | None = None,
     progress: ProgressBus | None = None,
     selected_style_profile_id: str | None = None,
 ) -> dict:
@@ -59,7 +60,9 @@ async def run_pipeline(
             gemini_client=clients.gemini_client,
             use_webapi=config.use_webapi,
             doc_texts=doc_texts or [],
+            doc_filenames=doc_filenames or [],
             progress=progress,
+            selected_style_profile_id=selected_style_profile_id,
         )
         final_data = await generate_json_plan(
             gathered_info=gathered_info,
@@ -70,6 +73,7 @@ async def run_pipeline(
             use_webapi=config.use_webapi,
             output_json_path=config.final_output_path,
             progress=progress,
+            selected_style_profile_id=selected_style_profile_id,
         )
 
     saved_files = await generate_all_images(

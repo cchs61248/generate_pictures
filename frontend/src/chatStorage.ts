@@ -72,8 +72,9 @@ export function resolvePersistedMainView(
 }
 
 /**
- * 完整重新載入時：自 localStorage 清除 referenceImageName，
- * 並向後端請求刪除 uploads/<session_id>.jpg 的 session id 列表。
+ * 完整重新載入時：
+ * 只有當前停留在聊天頁，且 active 對話為「AI 電商圖文助手」時，
+ * 才清除該 active session 的上傳狀態與後端 uploads 資源。
  */
 export function prepareLocalStorageAfterFullPageReload(): {
   persisted: PersistedState | null
@@ -85,25 +86,34 @@ export function prepareLocalStorageAfterFullPageReload(): {
     return { persisted: null, sessionIdsToDeleteUpload: [], sessionIdsToDeleteDocs: [] }
   }
 
-  const idSet = new Set<string>()
-  for (const s of persisted.sessions) {
-    if (s.id) idSet.add(s.id)
-  }
-  if (persisted.pendingToolSession?.id) {
-    idSet.add(persisted.pendingToolSession.id)
-  }
-  if (persisted.activeId) {
-    idSet.add(persisted.activeId)
-  }
-  const purgeIds = [...idSet]
+  const activePending =
+    persisted.pendingToolSession?.id === persisted.activeId
+      ? persisted.pendingToolSession
+      : null
+  const shouldPurgeActiveOnly =
+    persisted.mainView === "chat" &&
+    activePending?.toolId === "ecommerce-image" &&
+    Boolean(persisted.activeId)
+  const purgeIds =
+    shouldPurgeActiveOnly && persisted.activeId ? [persisted.activeId] : []
 
   const sessions = persisted.sessions.map((s) => ({
     ...s,
-    referenceImageName: undefined,
-    docFileNames: [],
+    referenceImageName:
+      shouldPurgeActiveOnly && s.id === persisted.activeId
+        ? undefined
+        : s.referenceImageName,
+    docFileNames:
+      shouldPurgeActiveOnly && s.id === persisted.activeId
+        ? []
+        : s.docFileNames,
   }))
   let nextPending = persisted.pendingToolSession
-  if (nextPending) {
+  if (
+    shouldPurgeActiveOnly &&
+    nextPending &&
+    nextPending.id === persisted.activeId
+  ) {
     nextPending = {
       ...nextPending,
       referenceImageName: undefined,

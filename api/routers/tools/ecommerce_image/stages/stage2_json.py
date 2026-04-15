@@ -10,11 +10,13 @@ import os
 
 from google.genai import types
 
+from api.deps import project_root
 from core.config import get_text_model
 from core.progress import GROUP_STAGE2_META, ProgressBus
 from core.token_logger import log_token_usage
 
 from api.routers.tools.ecommerce_image.prompts.json_schema import prompt_template
+from api.routers.tools.ecommerce_image.services.style_learning import get_style_prompt_by_id
 from api.routers.tools.ecommerce_image.utils.json_utils import (
     extract_json_candidate,
     repair_to_json_apikey,
@@ -63,6 +65,7 @@ async def generate_json_plan(
     use_webapi: bool,
     output_json_path: str,
     progress: ProgressBus | None = None,
+    selected_style_profile_id: str | None = None,
 ) -> list[dict]:
     if progress:
         await progress.emit(
@@ -81,6 +84,11 @@ async def generate_json_plan(
         )
 
     print("\n[階段二] 正在結合 json_schema 規範，生成最終的 AI 繪圖提示詞與文案...")
+    style_prompt = get_style_prompt_by_id(
+        root=project_root(),
+        selected_profile_id=selected_style_profile_id,
+    )
+    stage2_system_instruction = prompt_template + (style_prompt or "")
 
     format_prompt = f"""
 請根據以下我為你收集好的商品資訊，以及我上傳的商品圖片，
@@ -99,14 +107,14 @@ async def generate_json_plan(
     if not use_webapi:
         print("[LLM prompt] stage2_json · system_instruction (API key path only)")
         print("=" * 72)
-        print(prompt_template.strip())
+        print(stage2_system_instruction.strip())
         print("=" * 72 + "\n")
     else:
         print()
 
     if use_webapi:
         response = await gemini_client.generate_content(
-            format_prompt + "\n\n" + prompt_template,
+            format_prompt + "\n\n" + stage2_system_instruction,
             model="gemini-3-flash-thinking",
             files=[image_path],
         )
@@ -117,7 +125,7 @@ async def generate_json_plan(
             model=get_text_model(),
             contents=[format_prompt, image],
             config=types.GenerateContentConfig(
-                system_instruction=prompt_template,
+                system_instruction=stage2_system_instruction,
                 temperature=0.0,
                 response_mime_type="application/json",
             ),

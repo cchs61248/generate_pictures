@@ -897,6 +897,12 @@ export default function App() {
       persistComposerState(activeId)
       setMainView("chat")
       flushMessagesScroll()
+      const existingPending = pendingToolSessionRef.current
+      if (existingPending && existingPending.toolId === toolId) {
+        setActiveIdOnly(existingPending.id)
+        restoreComposerState(existingPending.id)
+        return
+      }
       const s = createSession(toolId)
       // 暫存，不加入 sessions；等送出第一筆訊息時才 commit
       setPendingToolSession(s)
@@ -917,7 +923,6 @@ export default function App() {
       persistComposerState(activeId)
       setMainView("chat")
       flushMessagesScroll()
-      setPendingToolSession(null)
       setActiveIdOnly(id)
       restoreComposerState(id)
     },
@@ -954,6 +959,13 @@ export default function App() {
         (s) => s.id !== id && s.parentId !== id,
       )
       if (nextSessions.length === 0) {
+        const currentPending = pendingToolSessionRef.current
+        const pendingAvailable =
+          !!currentPending && !targetIds.includes(currentPending.id)
+        if (pendingAvailable) {
+          nextPending = currentPending
+          return { sessions: [], activeId: currentPending.id }
+        }
         const temp = createDefaultTemporaryToolSession()
         nextPending = temp
         return { sessions: [], activeId: temp.id }
