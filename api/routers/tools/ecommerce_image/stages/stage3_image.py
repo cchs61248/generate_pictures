@@ -55,12 +55,17 @@ async def generate_all_images(
     use_hybrid: bool,
     session_id: str = "",
     progress: ProgressBus | None = None,
+    selected_style_profile_id: str | None = None,
 ) -> list[str]:
     print("\n[階段三] 正在為每張圖生成 AI 圖片，請稍候...")
     os.makedirs(picture_dir, exist_ok=True)
 
     saved_files: list[str] = []
+    cnt = 0
     for item in final_data:
+        cnt += 1
+        if cnt >= 2:
+            break
         sort_num = item["sort"]
         main_name = item["main"].replace('Prompt', '')
         image_prompt = compose_image_prompt(item)
@@ -95,6 +100,7 @@ async def generate_all_images(
                     gemini_client,
                     image_prompt,
                     image_path,
+                    selected_style_profile_id=selected_style_profile_id,
                 )
                 if not generated_images:
                     w = f"  ⚠️  P{sort_num:02d} Web API 產圖未取得圖片（Gemini 未生成圖片），跳過。"
@@ -122,6 +128,7 @@ async def generate_all_images(
                     genai_client,
                     image_prompt,
                     image,
+                    selected_style_profile_id,
                 )
                 usage = getattr(response, "usage_metadata", None)
                 if usage is not None:

@@ -4,8 +4,18 @@ import time
 
 from google.genai import types
 
+from api.deps import project_root
 from core.config import get_image_model, get_image_output_size
 from api.routers.tools.ecommerce_image.prompts.image_style import prompt_template as picture_style_template
+from api.routers.tools.ecommerce_image.services.style_learning import get_style_prompt_by_id
+
+
+def resolve_picture_style_template(selected_style_profile_id: str | None = None) -> str:
+    style_prompt = get_style_prompt_by_id(
+        root=project_root(),
+        selected_profile_id=selected_style_profile_id,
+    )
+    return picture_style_template + (style_prompt or "")
 
 
 def is_transient_google_api_error(err_str: str) -> bool:
@@ -32,6 +42,7 @@ def generate_image_with_retry(
     genai_client,
     image_prompt: str,
     product_image,
+    selected_style_profile_id: str | None = None,
     max_retries: int = 5,
 ):
     for attempt in range(max_retries + 1):
@@ -40,7 +51,9 @@ def generate_image_with_retry(
                 model=get_image_model(),
                 contents=[image_prompt, product_image],
                 config=types.GenerateContentConfig(
-                    system_instruction=picture_style_template,
+                    system_instruction=resolve_picture_style_template(
+                        selected_style_profile_id=selected_style_profile_id
+                    ),
                     response_modalities=["IMAGE"],
                     image_config=types.ImageConfig(
                         aspect_ratio="1:1",
@@ -62,11 +75,12 @@ async def generate_image_webapi(
     gemini_client,
     image_prompt: str,
     image_path: str,
+    selected_style_profile_id: str | None = None,
     max_retries: int = 5,
 ) -> list:
     final_prompt = f"""請幫我生成一張電商商品圖片，圖片大小1000*1000，請參考我上傳的商品圖片外觀，依照以下設計要求生成：
 
-{picture_style_template}
+{resolve_picture_style_template(selected_style_profile_id=selected_style_profile_id)}
 
 {image_prompt}
 """

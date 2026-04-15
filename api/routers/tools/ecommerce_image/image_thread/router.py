@@ -25,6 +25,10 @@ from api.routers.tools.ecommerce_image.image_thread.service import (
     load_image_thread_history,
     save_image_thread_history,
 )
+from api.routers.tools.ecommerce_image.services.style_learning import (
+    append_learning_event,
+    get_style_prompt_by_id,
+)
 from core.config import get_image_model, sync_managed_env_from_dotenv, get_image_output_size
 from core.token_logger import log_token_usage
 
@@ -63,6 +67,7 @@ async def chat_image_thread(payload: dict, request: Request):
     session_id = payload.get("session_id")
     user_text = payload.get("user_text", "").strip()
     session_title = payload.get("session_title", "").strip() or "thread"
+    selected_style_profile_id = payload.get("selected_style_profile_id")
 
     sid = safe_session_id(session_id)
     if not sid:
@@ -93,12 +98,16 @@ async def chat_image_thread(payload: dict, request: Request):
             client = genai_new.Client(api_key=api_key)
             model_name = get_image_model()
 
+            style_prompt = get_style_prompt_by_id(
+                root=root,
+                selected_profile_id=selected_style_profile_id,
+            )
             system_instruction = (
                 "你是一位專業的電商圖片修改助手。使用者會提供一張商品圖片，並以文字描述希望如何修改。\n"
                 "請依照使用者的描述修改圖片，並回傳修改後的圖片。\n"
                 "若使用者的描述不夠清楚，可以先以文字詢問補充資訊，同時也提供一個依目前理解修改的版本。\n"
                 "回應時請先以簡短文字說明你做了哪些修改，再提供圖片。"
-            )
+            ) + (style_prompt or "")
 
             with open(latest_image_abs, "rb") as img_f:
                 ref_image_bytes = img_f.read()
@@ -175,6 +184,16 @@ async def chat_image_thread(payload: dict, request: Request):
                 "image_path": saved_filename,
             })
             save_image_thread_history(root, sid, current_entries)
+            try:
+                append_learning_event(
+                    root=root,
+                    session_id=sid,
+                    user_text=user_text,
+                    model_text=result_text or "",
+                    image_path=saved_filename,
+                )
+            except Exception:
+                pass
 
             await queue.put({
                 "type": "complete",

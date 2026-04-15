@@ -338,6 +338,7 @@ export async function consumeImageThreadStream(
   sessionId: string,
   userText: string,
   sessionTitle: string,
+  selectedStyleProfileId: string,
   baseUrl: string,
   onEvent: (event: ImageThreadStreamEvent) => void,
   signal?: AbortSignal,
@@ -346,7 +347,15 @@ export async function consumeImageThreadStream(
     method: "POST",
     headers: { "Content-Type": "application/json" },
     signal,
-    body: JSON.stringify({ session_id: sessionId, user_text: userText, session_title: sessionTitle }),
+    body: JSON.stringify({
+      session_id: sessionId,
+      user_text: userText,
+      session_title: sessionTitle,
+      selected_style_profile_id:
+        selectedStyleProfileId && selectedStyleProfileId !== "none"
+          ? selectedStyleProfileId
+          : null,
+    }),
   })
   if (!res.ok) {
     const body = await safeJson(res)
@@ -393,6 +402,7 @@ export async function runGeneration(
   userInput: string,
   baseUrl: string,
   sessionId?: string,
+  selectedStyleProfileId?: string,
 ): Promise<RunResponse> {
   const res = await fetch(`${trimSlash(baseUrl)}/run`, {
     method: "POST",
@@ -401,6 +411,10 @@ export async function runGeneration(
       user_input: userInput,
       stage3_only: false,
       session_id: sessionId,
+      selected_style_profile_id:
+        selectedStyleProfileId && selectedStyleProfileId !== "none"
+          ? selectedStyleProfileId
+          : null,
     }),
   })
   if (!res.ok) {
@@ -418,6 +432,7 @@ export async function consumeRunStream(
   onEvent: (event: StreamEvent) => void,
   signal?: AbortSignal,
   sessionId?: string,
+  selectedStyleProfileId?: string,
 ): Promise<void> {
   const res = await fetch(`${trimSlash(baseUrl)}/run-stream`, {
     method: "POST",
@@ -427,6 +442,10 @@ export async function consumeRunStream(
       user_input: userInput,
       stage3_only: false,
       session_id: sessionId,
+      selected_style_profile_id:
+        selectedStyleProfileId && selectedStyleProfileId !== "none"
+          ? selectedStyleProfileId
+          : null,
     }),
   })
   if (!res.ok) {
@@ -509,6 +528,214 @@ export function imageUrlsFromSavedFiles(
     const name = absPath.split(/[/\\]/).pop() ?? absPath
     return `${base}/images/${encodeURIComponent(name)}`
   })
+}
+
+export type StyleProfile = {
+  id: string
+  name: string
+  summary?: string
+  prompt: string
+  created_at: string
+  source_event_count?: number
+  version?: number
+}
+
+export type StyleLearningStatus = {
+  queue_total: number
+  queue_pending_total: number
+  queue_extracted_total: number
+  profile: {
+    version: number
+    updated_at: string
+    default_profile_id: string
+    profiles: StyleProfile[]
+  }
+}
+
+export type StyleLearningQueueItem = {
+  event_id: string
+  timestamp: string
+  tool_id: string
+  session_id: string
+  user_text: string
+  model_text: string
+  image_path?: string | null
+  status?: "pending" | "extracted"
+  extracted_version?: number | null
+  extracted_at?: string | null
+}
+
+export type StyleLearningHistoryItem = {
+  type: string
+  timestamp: string
+  [k: string]: unknown
+}
+
+export type PagedResult<T> = {
+  items: T[]
+  page: number
+  page_size: number
+  total: number
+  total_pages: number
+}
+
+export async function fetchStyleLearningStatus(
+  baseUrl: string,
+): Promise<StyleLearningStatus> {
+  const res = await fetch(
+    `${trimSlash(baseUrl)}/tools/ecommerce-image/style-learning/status`,
+  )
+  if (!res.ok) {
+    const body = await safeJson(res)
+    throw new Error(extractDetail(body) || `讀取風格學習狀態失敗 (${res.status})`)
+  }
+  return res.json() as Promise<StyleLearningStatus>
+}
+
+export async function fetchStyleLearningQueue(
+  baseUrl: string,
+  page: number,
+  pageSize: number,
+  scope: "pending" | "extracted" | "all" = "pending",
+): Promise<PagedResult<StyleLearningQueueItem>> {
+  const params = new URLSearchParams({
+    page: String(page),
+    page_size: String(pageSize),
+    scope,
+  })
+  const res = await fetch(
+    `${trimSlash(baseUrl)}/tools/ecommerce-image/style-learning/queue?${params.toString()}`,
+  )
+  if (!res.ok) {
+    const body = await safeJson(res)
+    throw new Error(extractDetail(body) || `讀取 queue 失敗 (${res.status})`)
+  }
+  return res.json() as Promise<PagedResult<StyleLearningQueueItem>>
+}
+
+export async function restoreStyleLearningQueue(
+  baseUrl: string,
+  eventIds: string[],
+): Promise<{ restored: number; pending: number; extracted: number }> {
+  const res = await fetch(
+    `${trimSlash(baseUrl)}/tools/ecommerce-image/style-learning/queue/restore`,
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ event_ids: eventIds }),
+    },
+  )
+  if (!res.ok) {
+    const body = await safeJson(res)
+    throw new Error(extractDetail(body) || `恢復 queue 失敗 (${res.status})`)
+  }
+  return res.json() as Promise<{ restored: number; pending: number; extracted: number }>
+}
+
+export async function deleteStyleLearningQueue(
+  baseUrl: string,
+  eventIds: string[],
+): Promise<{ deleted: number; remaining: number }> {
+  const res = await fetch(
+    `${trimSlash(baseUrl)}/tools/ecommerce-image/style-learning/queue`,
+    {
+      method: "DELETE",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ event_ids: eventIds }),
+    },
+  )
+  if (!res.ok) {
+    const body = await safeJson(res)
+    throw new Error(extractDetail(body) || `刪除 queue 失敗 (${res.status})`)
+  }
+  return res.json() as Promise<{ deleted: number; remaining: number }>
+}
+
+export async function extractStyleLearning(
+  baseUrl: string,
+): Promise<{
+  ok: boolean
+  reason?: string
+  queue_before: number
+  queue_after: number
+}> {
+  const res = await fetch(
+    `${trimSlash(baseUrl)}/tools/ecommerce-image/style-learning/extract`,
+    {
+      method: "POST",
+    },
+  )
+  if (!res.ok) {
+    const body = await safeJson(res)
+    throw new Error(extractDetail(body) || `觸發萃取失敗 (${res.status})`)
+  }
+  return res.json() as Promise<{
+    ok: boolean
+    reason?: string
+    queue_before: number
+    queue_after: number
+  }>
+}
+
+export async function rollbackStyleLearning(
+  baseUrl: string,
+  profileId: string,
+): Promise<{ ok: boolean; default_profile_id: string }> {
+  const res = await fetch(
+    `${trimSlash(baseUrl)}/tools/ecommerce-image/style-learning/rollback`,
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ profile_id: profileId }),
+    },
+  )
+  if (!res.ok) {
+    const body = await safeJson(res)
+    throw new Error(extractDetail(body) || `回滾失敗 (${res.status})`)
+  }
+  return res.json() as Promise<{ ok: boolean; default_profile_id: string }>
+}
+
+export async function deleteStyleProfile(
+  baseUrl: string,
+  profileId: string,
+): Promise<{ ok: boolean; deleted_profile_id: string; default_profile_id: string }> {
+  const res = await fetch(
+    `${trimSlash(baseUrl)}/tools/ecommerce-image/style-learning/profile`,
+    {
+      method: "DELETE",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ profile_id: profileId }),
+    },
+  )
+  if (!res.ok) {
+    const body = await safeJson(res)
+    throw new Error(extractDetail(body) || `刪除偏好失敗 (${res.status})`)
+  }
+  return res.json() as Promise<{
+    ok: boolean
+    deleted_profile_id: string
+    default_profile_id: string
+  }>
+}
+
+export async function fetchStyleLearningHistory(
+  baseUrl: string,
+  page: number,
+  pageSize: number,
+): Promise<PagedResult<StyleLearningHistoryItem>> {
+  const params = new URLSearchParams({
+    page: String(page),
+    page_size: String(pageSize),
+  })
+  const res = await fetch(
+    `${trimSlash(baseUrl)}/tools/ecommerce-image/style-learning/history?${params.toString()}`,
+  )
+  if (!res.ok) {
+    const body = await safeJson(res)
+    throw new Error(extractDetail(body) || `讀取歷史失敗 (${res.status})`)
+  }
+  return res.json() as Promise<PagedResult<StyleLearningHistoryItem>>
 }
 
 function trimSlash(url: string): string {

@@ -31,6 +31,7 @@ async def run_generation(payload: dict):
     stage3_only = bool(payload.get("stage3_only", False))
     user_input = payload.get("user_input")
     session_id = payload.get("session_id")
+    selected_style_profile_id = payload.get("selected_style_profile_id")
 
     root = project_root()
     sync_managed_env_from_dotenv(os.path.join(root, ".env"))
@@ -40,7 +41,12 @@ async def run_generation(payload: dict):
     doc_texts = load_session_document_texts(root, config.session_id or session_id)
 
     try:
-        result = await run_pipeline(config=config, user_input=user_input, doc_texts=doc_texts)
+        result = await run_pipeline(
+            config=config,
+            user_input=user_input,
+            doc_texts=doc_texts,
+            selected_style_profile_id=selected_style_profile_id,
+        )
         return {
             "ok": True,
             "final_output_path": result["final_output_path"],
@@ -56,6 +62,7 @@ async def run_generation_stream(payload: dict, request: Request):
     stage3_only = bool(payload.get("stage3_only", False))
     user_input = payload.get("user_input")
     session_id = payload.get("session_id")
+    selected_style_profile_id = payload.get("selected_style_profile_id")
 
     root = project_root()
     sync_managed_env_from_dotenv(os.path.join(root, ".env"))
@@ -73,6 +80,7 @@ async def run_generation_stream(payload: dict, request: Request):
                 user_input=user_input,
                 doc_texts=doc_texts,
                 progress=bus,
+                selected_style_profile_id=selected_style_profile_id,
             )
             await queue.put(
                 {

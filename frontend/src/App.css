@@ -92,6 +92,22 @@
   letter-spacing: -0.02em;
 }
 
+.app-title-row {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+}
+
+.app-header-style-select {
+  max-width: 220px;
+  border-radius: 999px;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  background: #1e1e1e;
+  color: #e3e3e3;
+  padding: 0.28rem 0.7rem;
+  font-size: 0.78rem;
+}
+
 .app-sub {
   margin: 0.2rem 0 0;
   font-size: 0.7rem;
@@ -155,6 +171,28 @@
 
 .settings-page-intro {
   margin-bottom: 1.25rem;
+}
+
+.settings-tabs {
+  display: flex;
+  gap: 0.5rem;
+  margin-top: 0.75rem;
+}
+
+.settings-tab-btn {
+  border: 1px solid rgba(255, 255, 255, 0.15);
+  background: transparent;
+  color: #e3e3e3;
+  border-radius: 999px;
+  padding: 0.35rem 0.9rem;
+  cursor: pointer;
+  font-size: 0.82rem;
+}
+
+.settings-tab-btn--active {
+  background: rgba(138, 180, 248, 0.18);
+  border-color: rgba(138, 180, 248, 0.45);
+  color: #dbeafe;
 }
 
 .settings-page-title {
@@ -273,6 +311,62 @@
   margin-top: 1.5rem;
   padding-top: 1rem;
   border-top: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+.style-learning-page {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+}
+
+.style-current-card {
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  background: rgba(255, 255, 255, 0.03);
+  border-radius: 0.6rem;
+  padding: 0.75rem;
+}
+
+.style-prompt-preview {
+  margin: 0.5rem 0 0;
+  white-space: pre-wrap;
+  word-break: break-word;
+  max-height: 220px;
+  overflow: auto;
+  font-size: 0.8rem;
+  font-family: ui-monospace, monospace;
+}
+
+.style-queue-actions {
+  margin-bottom: 0.5rem;
+}
+
+.style-cell-text {
+  max-width: 360px;
+  white-space: pre-wrap;
+  word-break: break-word;
+  font-size: 0.8rem;
+}
+
+.style-profile-list {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.style-profile-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 0.5rem;
+  padding: 0.6rem 0.75rem;
+}
+
+.style-profile-actions {
+  display: flex;
+  align-items: center;
+  gap: 0.45rem;
 }
 
 .settings-save {

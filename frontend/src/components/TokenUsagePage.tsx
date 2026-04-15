@@ -17,6 +17,8 @@ type Props = {
   savedTableScrollX?: { summary?: number; detail?: number }
   onTableScrollXPersist?: (which: "summary" | "detail", scrollLeft: number) => void
   tableScrollFlushRef?: MutableRefObject<() => void>
+  savedDateRange?: { start?: string; end?: string }
+  onDateRangeChange?: (next: { start: string; end: string }) => void
 }
 
 function todayStr(): string {
@@ -167,9 +169,15 @@ export function TokenUsagePage({
   savedTableScrollX,
   onTableScrollXPersist,
   tableScrollFlushRef,
+  savedDateRange,
+  onDateRangeChange,
 }: Props) {
-  const [start, setStart] = useState(firstDayOfMonthStr)
-  const [end, setEnd] = useState(todayStr)
+  const [start, setStart] = useState(
+    () => savedDateRange?.start || firstDayOfMonthStr(),
+  )
+  const [end, setEnd] = useState(
+    () => savedDateRange?.end || todayStr(),
+  )
   const [records, setRecords] = useState<TokenUsageRecord[]>([])
   const [summaryPage, setSummaryPage] = useState(1)
   const [detailPage, setDetailPage] = useState(1)
@@ -204,6 +212,10 @@ export function TokenUsagePage({
   useEffect(() => {
     void load()
   }, [load])
+
+  useEffect(() => {
+    onDateRangeChange?.({ start, end })
+  }, [end, onDateRangeChange, start])
 
   useLayoutEffect(() => {
     if (loading) return

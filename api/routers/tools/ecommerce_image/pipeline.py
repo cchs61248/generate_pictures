@@ -26,6 +26,7 @@ async def run_pipeline(
     user_input: str | None = None,
     doc_texts: list[str] | None = None,
     progress: ProgressBus | None = None,
+    selected_style_profile_id: str | None = None,
 ) -> dict:
     require_text_client = not config.stage3_only_mode
     require_image_client = True
@@ -82,6 +83,7 @@ async def run_pipeline(
         use_webapi=config.use_webapi,
         use_hybrid=config.use_hybrid,
         progress=progress,
+        selected_style_profile_id=selected_style_profile_id,
     )
 
     return {

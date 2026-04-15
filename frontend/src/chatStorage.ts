@@ -14,6 +14,8 @@ export type PersistedUiScroll = {
   tokenUsageMain?: number
   tokenUsageSummaryTableX?: number
   tokenUsageDetailTableX?: number
+  tokenUsageStartDate?: string
+  tokenUsageEndDate?: string
 }
 
 export type PersistedState = {
@@ -53,6 +55,10 @@ export function normalizePendingSession(raw: unknown): ChatSession | null {
     referenceImageName: p.referenceImageName,
     docFileNames: Array.isArray(p.docFileNames) ? p.docFileNames : undefined,
     threadSourceKey: p.threadSourceKey,
+    selectedStyleProfileId:
+      typeof p.selectedStyleProfileId === "string"
+        ? p.selectedStyleProfileId
+        : "none",
   }
 }
 
@@ -133,6 +139,10 @@ export function loadPersistedState(): PersistedState | null {
       streamPrimed: false,
       taskCompleted: Boolean((s as Partial<ChatSession>).taskCompleted),
       clearOnNextSend: Boolean((s as Partial<ChatSession>).clearOnNextSend),
+      selectedStyleProfileId:
+        typeof (s as Partial<ChatSession>).selectedStyleProfileId === "string"
+          ? (s as Partial<ChatSession>).selectedStyleProfileId
+          : "none",
     }))
     const p = normalizePendingSession(data.pendingToolSession)
     if (p) {

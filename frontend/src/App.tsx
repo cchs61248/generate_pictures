@@ -20,6 +20,8 @@ import {
   imageUrlsFromSavedFiles,
   initImageThread,
   saveSessionState,
+  fetchStyleLearningStatus,
+  type StyleProfile,
   uploadDocument,
   uploadImage,
 } from "./api"
@@ -62,6 +64,7 @@ function createSession(toolId?: string): ChatSession {
     taskCompleted: false,
     clearOnNextSend: false,
     toolId,
+    selectedStyleProfileId: "none",
   }
 }
 
@@ -325,6 +328,7 @@ export default function App() {
   const [mainView, setMainView] = useState<"chat" | "settings" | "token_usage">(
     () => APP_BOOT.mainView,
   )
+  const [styleProfiles, setStyleProfiles] = useState<StyleProfile[]>([])
   /**
    * 點擊工具後建立的「暫存對話」，尚未加入 sessions。
    * 送出第一筆訊息時才正式 commit 進 sessions。
@@ -786,6 +790,17 @@ export default function App() {
     [],
   )
 
+  const persistTokenUsageDateRange = useCallback(
+    (next: { start: string; end: string }) => {
+      setUiScroll((s) => ({
+        ...s,
+        tokenUsageStartDate: next.start,
+        tokenUsageEndDate: next.end,
+      }))
+    },
+    [],
+  )
+
   /** 重新整理／關閉分頁前強制寫入捲動位置（避免 400ms debounce 尚未提交） */
   useEffect(() => {
     const onHidden = () => {
@@ -834,6 +849,22 @@ export default function App() {
     setServerReady(false)
     setDocUploads([])
   }, [])
+
+  useEffect(() => {
+    let cancelled = false
+    void (async () => {
+      try {
+        const status = await fetchStyleLearningStatus(baseUrl)
+        if (cancelled) return
+        setStyleProfiles(status.profile?.profiles ?? [])
+      } catch {
+        // 風格學習功能不可用時不阻斷主流程
+      }
+    })()
+    return () => {
+      cancelled = true
+    }
+  }, [baseUrl])
 
   useEffect(() => {
     const handleStorage = (ev: StorageEvent) => {
@@ -1160,6 +1191,7 @@ export default function App() {
       }
 
       const sessionId = activeId
+      const selectedStyleProfileId = activeSession?.selectedStyleProfileId ?? "none"
       patchSession(sessionId, (s) => ({
         ...s,
         isRunning: true,
@@ -1175,6 +1207,7 @@ export default function App() {
           sessionId,
           text,
           sessionTitle,
+          selectedStyleProfileId,
           baseUrl,
           (ev) => {
             if (ev.type === "progress") {
@@ -1438,7 +1471,7 @@ export default function App() {
             },
           ])
         }
-      }, aborter.signal, sessionId)
+      }, aborter.signal, sessionId, activeSession?.selectedStyleProfileId ?? "none")
     } catch (e) {
       if (e instanceof DOMException && e.name === "AbortError") {
         patchSessionMessages(sessionId, (m) => [
@@ -1482,6 +1515,7 @@ export default function App() {
   }, [
     activeId,
     activeSession?.title,
+    activeSession?.selectedStyleProfileId,
     baseUrl,
     docUploads,
     file,
@@ -1536,6 +1570,7 @@ export default function App() {
         imageThreadLocked: true,
         referenceImageName: undefined,
         threadSourceKey: sourceKey,
+        selectedStyleProfileId: activeSession?.selectedStyleProfileId ?? "none",
       }
       setMainView("chat")
       // 同步提交：避免 (1) 暫存主對話先被清掉導致 activeId 找不到 session
@@ -1663,17 +1698,42 @@ export default function App() {
               </button>
             ) : null}
             <div className="app-header-titles">
-              <h1 className="app-title">
-                {mainView === "settings"
-                  ? "設定與說明"
-                  : mainView === "token_usage"
-                    ? "Token 用量"
-                    : activeSession?.parentId
-                    ? activeSession.title
-                    : activeSession?.toolId
-                      ? (getToolById(activeSession.toolId)?.chatTitle ?? "AI 助手")
-                      : "AI 電商圖文助手"}
-              </h1>
+              <div className="app-title-row">
+                <h1 className="app-title">
+                  {mainView === "settings"
+                    ? "設定與說明"
+                    : mainView === "token_usage"
+                      ? "Token 用量"
+                      : activeSession?.parentId
+                      ? activeSession.title
+                      : activeSession?.toolId
+                        ? (getToolById(activeSession.toolId)?.chatTitle ?? "AI 助手")
+                        : "AI 電商圖文助手"}
+                </h1>
+                {mainView === "chat" ? (
+                  <select
+                    className="app-header-style-select"
+                    value={activeSession?.selectedStyleProfileId ?? "none"}
+                    onChange={(e) => {
+                      const profileId = e.target.value
+                      patchActiveSession((s) => ({
+                        ...s,
+                        selectedStyleProfileId: profileId || "none",
+                        updatedAt: Date.now(),
+                      }))
+                    }}
+                    aria-label="風格偏好"
+                    title="選擇是否套用歷史風格偏好"
+                  >
+                    <option value="none">不使用風格偏好</option>
+                    {styleProfiles.map((p) => (
+                      <option key={p.id} value={p.id}>
+                        {p.name}
+                      </option>
+                    ))}
+                  </select>
+                ) : null}
+              </div>
               <p className="app-sub">API：{baseUrl}</p>
             </div>
           </header>
@@ -1695,6 +1755,11 @@ export default function App() {
                 baseUrl={baseUrl}
                 scrollContainerRef={settingsMainRef}
                 savedMainScrollTop={uiScroll.settingsMain}
+                onStyleLearningChanged={() => {
+                  void fetchStyleLearningStatus(baseUrl)
+                    .then((status) => setStyleProfiles(status.profile?.profiles ?? []))
+                    .catch(() => {})
+                }}
               />
             ) : mainView === "token_usage" ? (
               <TokenUsagePage
@@ -1707,6 +1772,11 @@ export default function App() {
                 }}
                 onTableScrollXPersist={persistTokenTableScrollX}
                 tableScrollFlushRef={tokenTablesScrollFlushRef}
+                savedDateRange={{
+                  start: uiScroll.tokenUsageStartDate,
+                  end: uiScroll.tokenUsageEndDate,
+                }}
+                onDateRangeChange={persistTokenUsageDateRange}
               />
             ) : (
               <>

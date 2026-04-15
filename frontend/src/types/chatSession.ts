@@ -28,6 +28,8 @@ export type ChatSession = {
   threadSourceKey?: string
   /** 已上傳的附件文件清單（最多 3 個），重新整理後清除 */
   docFileNames?: { serverFilename: string; originalName: string }[]
+  /** 使用中的工具級風格偏好（none 代表不使用） */
+  selectedStyleProfileId?: string
 }
 
 export const DEFAULT_SESSION_TITLE = "AI 電商圖文助手"
