@@ -15,6 +15,9 @@ def resolve_picture_style_template(selected_style_profile_id: str | None = None)
         root=project_root(),
         selected_profile_id=selected_style_profile_id,
     )
+    print('==============resolve_picture_style_template==============')
+    print(picture_style_template + (style_prompt or ""))
+    print('==============resolve_picture_style_template==============')
     return picture_style_template + (style_prompt or "")
 
 

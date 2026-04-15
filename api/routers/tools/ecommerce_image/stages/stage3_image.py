@@ -64,7 +64,7 @@ async def generate_all_images(
     cnt = 0
     for item in final_data:
         cnt += 1
-        if cnt >= 2:
+        if cnt >= 5:
             break
         sort_num = item["sort"]
         main_name = item["main"].replace('Prompt', '')

@@ -366,7 +366,7 @@ export function SettingsPage({
               className={`settings-tab-btn ${activeTab === "style" ? "settings-tab-btn--active" : ""}`}
               onClick={() => setActiveTab("style")}
             >
-              AI 風格學習
+              AI 電商圖文助手 風格學習
             </button>
           </div>
         </div>

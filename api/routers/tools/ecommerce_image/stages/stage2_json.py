@@ -87,8 +87,6 @@ async def generate_json_plan(
 嚴格按照系統提示詞中的固定格式（P1~P9），
 生成完整的電商商品視覺設計與行銷文案。
 
-{prompt_template}
-
 【商品資訊】
 {gathered_info}
 """
@@ -108,7 +106,7 @@ async def generate_json_plan(
 
     if use_webapi:
         response = await gemini_client.generate_content(
-            format_prompt,
+            format_prompt + "\n\n" + prompt_template,
             model="gemini-3-flash-thinking",
             files=[image_path],
         )
