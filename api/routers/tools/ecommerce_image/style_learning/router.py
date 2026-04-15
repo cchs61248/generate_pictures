@@ -12,6 +12,7 @@ from api.routers.tools.ecommerce_image.services.style_learning import (
     list_history,
     list_queue_page,
     load_style_profile,
+    rename_profile,
     restore_queue_events,
     rollback_profile,
 )
@@ -111,5 +112,25 @@ async def style_learning_profile_delete(payload: dict):
     root = project_root()
     try:
         return delete_profile(root=root, profile_id=profile_id, actor="manual-ui")
+    except Exception as exc:
+        raise HTTPException(status_code=400, detail=readable_error(exc)) from exc
+
+
+@router.put("/tools/ecommerce-image/style-learning/profile")
+async def style_learning_profile_rename(payload: dict):
+    profile_id = payload.get("profile_id")
+    new_name = payload.get("new_name")
+    if not isinstance(profile_id, str) or not profile_id.strip():
+        raise HTTPException(status_code=400, detail="profile_id is required")
+    if not isinstance(new_name, str) or not new_name.strip():
+        raise HTTPException(status_code=400, detail="new_name is required")
+    root = project_root()
+    try:
+        return rename_profile(
+            root=root,
+            profile_id=profile_id,
+            new_name=new_name,
+            actor="manual-ui",
+        )
     except Exception as exc:
         raise HTTPException(status_code=400, detail=readable_error(exc)) from exc

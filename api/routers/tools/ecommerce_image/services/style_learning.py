@@ -15,7 +15,7 @@ PROFILE_FILE = "style_profile_ecommerce_image.json"
 HISTORY_FILE = "style_profile_ecommerce_image_versions.json"
 DEFAULT_PAGE_SIZE = 10
 MAX_PAGE_SIZE = 50
-MAX_PROFILE_HISTORY = 30
+MAX_PROFILE_HISTORY = 5
 MAX_EVENT_CHARS = 2000
 MAX_PROFILE_PROMPT_CHARS = 1400
 
@@ -374,6 +374,18 @@ def extract_style_profile(
         profile_doc = _read_json(ppath, _default_profile_doc())
         if not isinstance(profile_doc, dict):
             profile_doc = _default_profile_doc()
+        profiles = profile_doc.get("profiles", [])
+        if not isinstance(profiles, list):
+            profiles = []
+        if len(profiles) >= MAX_PROFILE_HISTORY:
+            return {
+                "ok": False,
+                "reason": "profile_limit_reached",
+                "profile_limit": MAX_PROFILE_HISTORY,
+                "profile_count": len(profiles),
+                "queue_before": queue_before,
+                "queue_after": queue_before,
+            }
         active_profile = _current_default_profile(profile_doc)
 
     lines: list[str] = []
@@ -517,6 +529,54 @@ def extract_style_profile(
         "queue_before": queue_before,
         "queue_after": max(0, queue_before - len(samples)),
     }
+
+
+def rename_profile(
+    root: str,
+    profile_id: str,
+    new_name: str,
+    actor: str = "manual-ui",
+) -> dict:
+    pid = str(profile_id or "").strip()
+    name = _normalize_text(new_name)
+    if not pid:
+        raise ValueError("profile_id is required")
+    if not name:
+        raise ValueError("new_name is required")
+
+    with _lock:
+        ppath = _profile_path(root)
+        profile_doc = _read_json(ppath, _default_profile_doc())
+        if not isinstance(profile_doc, dict):
+            profile_doc = _default_profile_doc()
+        profiles = profile_doc.get("profiles", [])
+        if not isinstance(profiles, list):
+            profiles = []
+
+        found = None
+        for p in profiles:
+            if str(p.get("id", "")) == pid:
+                found = p
+                break
+        if not found:
+            raise ValueError("profile_id not found")
+
+        old_name = str(found.get("name", "") or "")
+        found["name"] = name[:24]
+        profile_doc["updated_at"] = _utc_now_iso()
+        _write_json_atomic(ppath, profile_doc)
+        _append_history_locked(
+            root,
+            {
+                "type": "profile_rename",
+                "timestamp": _utc_now_iso(),
+                "profile_id": pid,
+                "old_name": old_name,
+                "new_name": found["name"],
+                "actor": actor,
+            },
+        )
+    return {"ok": True, "profile_id": pid, "name": found["name"]}
 
 
 def rollback_profile(root: str, profile_id: str, actor: str = "manual-ui") -> dict:

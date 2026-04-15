@@ -656,6 +656,8 @@ export async function extractStyleLearning(
 ): Promise<{
   ok: boolean
   reason?: string
+  profile_limit?: number
+  profile_count?: number
   queue_before: number
   queue_after: number
 }> {
@@ -672,6 +674,8 @@ export async function extractStyleLearning(
   return res.json() as Promise<{
     ok: boolean
     reason?: string
+    profile_limit?: number
+    profile_count?: number
     queue_before: number
     queue_after: number
   }>
@@ -717,6 +721,26 @@ export async function deleteStyleProfile(
     deleted_profile_id: string
     default_profile_id: string
   }>
+}
+
+export async function renameStyleProfile(
+  baseUrl: string,
+  profileId: string,
+  newName: string,
+): Promise<{ ok: boolean; profile_id: string; name: string }> {
+  const res = await fetch(
+    `${trimSlash(baseUrl)}/tools/ecommerce-image/style-learning/profile`,
+    {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ profile_id: profileId, new_name: newName }),
+    },
+  )
+  if (!res.ok) {
+    const body = await safeJson(res)
+    throw new Error(extractDetail(body) || `修改偏好名稱失敗 (${res.status})`)
+  }
+  return res.json() as Promise<{ ok: boolean; profile_id: string; name: string }>
 }
 
 export async function fetchStyleLearningHistory(

@@ -17,6 +17,7 @@ import {
   fetchStyleLearningStatus,
   type ModelChoiceOption,
   restoreStyleLearningQueue,
+  renameStyleProfile,
   rollbackStyleLearning,
   type StyleLearningHistoryItem,
   type StyleLearningQueueItem,
@@ -31,10 +32,13 @@ type Props = {
   /** 設定頁外層滾動容器（app-main--settings），用於還原垂直捲動 */
   scrollContainerRef?: RefObject<HTMLElement | null>
   savedMainScrollTop?: number
+  activeTab?: "env" | "style"
+  onTabChange?: (tab: "env" | "style") => void
   onStyleLearningChanged?: () => void
 }
 
 const GEMINI_BACKEND_OPTIONS = ["apikey", "hybrid"] as const
+const STYLE_PROFILE_LIMIT = 5
 
 function clampMaxLlmSearchCallsInput(raw: string): string {
   const v = raw.trim()
@@ -71,9 +75,16 @@ export function SettingsPage({
   baseUrl,
   scrollContainerRef,
   savedMainScrollTop,
+  activeTab: activeTabProp,
+  onTabChange,
   onStyleLearningChanged,
 }: Props) {
-  const [activeTab, setActiveTab] = useState<"env" | "style">("env")
+  const [activeTab, setActiveTab] = useState<"env" | "style">(activeTabProp ?? "env")
+  useEffect(() => {
+    if (!activeTabProp) return
+    setActiveTab(activeTabProp)
+  }, [activeTabProp])
+
   const [rows, setRows] = useState<EnvVariableRow[]>([])
   const [modelChoices, setModelChoices] = useState<
     Record<string, ModelChoiceOption[]>
@@ -94,6 +105,8 @@ export function SettingsPage({
   const [historyTotalPages, setHistoryTotalPages] = useState(1)
   const [styleBusy, setStyleBusy] = useState(false)
   const [styleMsg, setStyleMsg] = useState<string | null>(null)
+  const [renamingProfileId, setRenamingProfileId] = useState<string | null>(null)
+  const [renameInput, setRenameInput] = useState("")
 
   const load = useCallback(async () => {
     setError(null)
@@ -181,7 +194,7 @@ export function SettingsPage({
     }
     apply()
     requestAnimationFrame(apply)
-  }, [loading, rows, scrollContainerRef, savedMainScrollTop])
+  }, [activeTab, historyRows, loading, rows, scrollContainerRef, savedMainScrollTop, styleQueue, styleStatus])
 
   const setValue = (key: string, value: string) => {
     setRows((prev) =>
@@ -234,6 +247,13 @@ export function SettingsPage({
   }, [styleStatus])
 
   const handleExtract = async () => {
+    const profileCount = styleStatus?.profile.profiles?.length ?? 0
+    if (profileCount >= STYLE_PROFILE_LIMIT) {
+      window.alert(
+        `歷史偏好版本最多只能保留 ${STYLE_PROFILE_LIMIT} 個。\n請先刪除到小於 ${STYLE_PROFILE_LIMIT} 個後，再執行萃取。`,
+      )
+      return
+    }
     setStyleBusy(true)
     setStyleMsg(null)
     setError(null)
@@ -356,6 +376,40 @@ export function SettingsPage({
     }
   }
 
+  const handleStartRename = (profileId: string, oldName: string) => {
+    setRenamingProfileId(profileId)
+    setRenameInput(oldName)
+  }
+
+  const handleCancelRename = () => {
+    setRenamingProfileId(null)
+    setRenameInput("")
+  }
+
+  const handleSubmitRename = async (profileId: string) => {
+    const nextName = renameInput.trim()
+    if (!nextName) {
+      window.alert("名稱不可為空白。")
+      return
+    }
+    setStyleBusy(true)
+    setStyleMsg(null)
+    setError(null)
+    try {
+      await renameStyleProfile(baseUrl, profileId, nextName)
+      setStyleMsg("已更新歷史偏好名稱。")
+      setRenamingProfileId(null)
+      setRenameInput("")
+      await refreshStyleAll(queuePage, historyPage)
+      onStyleLearningChanged?.()
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : String(e)
+      setError(msg)
+    } finally {
+      setStyleBusy(false)
+    }
+  }
+
   if (loading) {
     return (
       <div className="settings-page">
@@ -375,14 +429,20 @@ export function SettingsPage({
             <button
               type="button"
               className={`settings-tab-btn ${activeTab === "env" ? "settings-tab-btn--active" : ""}`}
-              onClick={() => setActiveTab("env")}
+              onClick={() => {
+                setActiveTab("env")
+                onTabChange?.("env")
+              }}
             >
               環境變數
             </button>
             <button
               type="button"
               className={`settings-tab-btn ${activeTab === "style" ? "settings-tab-btn--active" : ""}`}
-              onClick={() => setActiveTab("style")}
+              onClick={() => {
+                setActiveTab("style")
+                onTabChange?.("style")
+              }}
             >
               AI 電商圖文助手 風格學習
             </button>
@@ -721,10 +781,54 @@ export function SettingsPage({
                 {sortedProfiles.map((p) => (
                   <div key={p.id} className="style-profile-item">
                     <div>
-                      <p><strong>{p.name}</strong></p>
+                      {renamingProfileId === p.id ? (
+                        <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
+                          <input
+                            className="settings-env-input"
+                            type="text"
+                            maxLength={24}
+                            value={renameInput}
+                            onChange={(e) => setRenameInput(e.target.value)}
+                            onKeyDown={(e) => {
+                              if (e.key === "Enter") {
+                                e.preventDefault()
+                                void handleSubmitRename(p.id)
+                              }
+                            }}
+                            disabled={styleBusy}
+                            aria-label="歷史偏好名稱"
+                          />
+                          <button
+                            type="button"
+                            className="token-page-btn"
+                            disabled={styleBusy}
+                            onClick={() => void handleSubmitRename(p.id)}
+                          >
+                            保存
+                          </button>
+                          <button
+                            type="button"
+                            className="token-page-btn"
+                            disabled={styleBusy}
+                            onClick={handleCancelRename}
+                          >
+                            取消
+                          </button>
+                        </div>
+                      ) : (
+                        <p><strong>{p.name}</strong></p>
+                      )}
                       <p className="settings-env-desc">{p.summary || "（無摘要）"}</p>
                     </div>
                     <div className="style-profile-actions">
+                      <button
+                        type="button"
+                        className="token-page-btn"
+                        disabled={styleBusy}
+                        onClick={() => handleStartRename(p.id, p.name)}
+                      >
+                        改名
+                      </button>
                       <button
                         type="button"
                         className="token-page-btn"

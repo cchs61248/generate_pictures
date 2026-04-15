@@ -170,6 +170,13 @@
 }
 
 .settings-page-intro {
+  position: sticky;
+  top: 0;
+  z-index: 10;
+  padding: 0.25rem 0 0.75rem;
+  margin: -0.25rem 0 1.25rem;
+  background: #131314;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
   margin-bottom: 1.25rem;
 }
 

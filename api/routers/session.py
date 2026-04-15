@@ -7,6 +7,7 @@ Session 狀態管理 Router
 """
 import json
 import os
+import time
 
 from fastapi import APIRouter, HTTPException
 
@@ -97,7 +98,27 @@ def save_session_state(root: str, payload: dict) -> dict:
     }
     with open(temp_path, "w", encoding="utf-8") as f:
         json.dump(data, f, ensure_ascii=False)
-    os.replace(temp_path, path)
+        f.flush()
+        os.fsync(f.fileno())
+
+    # Windows 上目標檔若被短暫占用，os.replace 可能拋 PermissionError。
+    # 先做短重試；若仍失敗則退回直接覆寫，避免 API 因暫時鎖檔而 500。
+    for attempt in range(5):
+        try:
+            os.replace(temp_path, path)
+            break
+        except PermissionError:
+            if attempt == 4:
+                with open(path, "w", encoding="utf-8") as f:
+                    json.dump(data, f, ensure_ascii=False)
+                    f.flush()
+                    os.fsync(f.fileno())
+                try:
+                    os.remove(temp_path)
+                except OSError:
+                    pass
+            else:
+                time.sleep(0.05 * (attempt + 1))
     return data
 
 

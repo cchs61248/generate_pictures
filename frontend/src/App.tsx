@@ -328,6 +328,7 @@ export default function App() {
   const [mainView, setMainView] = useState<"chat" | "settings" | "token_usage">(
     () => APP_BOOT.mainView,
   )
+  const [settingsTab, setSettingsTab] = useState<"env" | "style">("env")
   const [styleProfiles, setStyleProfiles] = useState<StyleProfile[]>([])
   const [styleDefaultProfileId, setStyleDefaultProfileId] = useState<string>("none")
   /**
@@ -739,12 +740,16 @@ export default function App() {
       const el = settingsMainRef.current
       if (!el) return
       if (mainView === "settings") {
-        setUiScroll((s) => ({ ...s, settingsMain: el.scrollTop }))
+        setUiScroll((s) =>
+          settingsTab === "style"
+            ? { ...s, settingsStyleMain: el.scrollTop }
+            : { ...s, settingsEnvMain: el.scrollTop },
+        )
       } else if (mainView === "token_usage") {
         setUiScroll((s) => ({ ...s, tokenUsageMain: el.scrollTop }))
       }
     }, 400)
-  }, [mainView])
+  }, [mainView, settingsTab])
 
   const flushSettingsMainScroll = useCallback(() => {
     if (settingsMainScrollTimerRef.current) {
@@ -759,12 +764,16 @@ export default function App() {
       const el = settingsMainRef.current
       if (!el) return
       if (mainView === "settings") {
-        setUiScroll((s) => ({ ...s, settingsMain: el.scrollTop }))
+        setUiScroll((s) =>
+          settingsTab === "style"
+            ? { ...s, settingsStyleMain: el.scrollTop }
+            : { ...s, settingsEnvMain: el.scrollTop },
+        )
       } else if (mainView === "token_usage") {
         setUiScroll((s) => ({ ...s, tokenUsageMain: el.scrollTop }))
       }
     }
-  }, [mainView])
+  }, [mainView, settingsTab])
 
   const scheduleSidebarListScrollPersist = useCallback((scrollTop: number) => {
     if (sidebarListScrollTimerRef.current) {
@@ -1783,7 +1792,13 @@ export default function App() {
               <SettingsPage
                 baseUrl={baseUrl}
                 scrollContainerRef={settingsMainRef}
-                savedMainScrollTop={uiScroll.settingsMain}
+                savedMainScrollTop={
+                  settingsTab === "style"
+                    ? (uiScroll.settingsStyleMain ?? uiScroll.settingsMain)
+                    : (uiScroll.settingsEnvMain ?? uiScroll.settingsMain)
+                }
+                activeTab={settingsTab}
+                onTabChange={setSettingsTab}
                 onStyleLearningChanged={() => {
                   void fetchStyleLearningStatus(baseUrl)
                     .then((status) => {

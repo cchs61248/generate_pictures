@@ -10,6 +10,11 @@ export type PersistedUiScroll = {
   sidebarList?: number
   /** 側欄主 session（有子討論串）是否展開；缺省為 true，顯式 false 表示收合 */
   sidebarExpandedParents?: Record<string, boolean>
+  /** 設定頁：環境變數 tab 的垂直捲動位置 */
+  settingsEnvMain?: number
+  /** 設定頁：風格學習 tab 的垂直捲動位置 */
+  settingsStyleMain?: number
+  /** 舊版相容（單一設定頁捲動位置） */
   settingsMain?: number
   tokenUsageMain?: number
   tokenUsageSummaryTableX?: number
