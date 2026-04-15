@@ -329,6 +329,7 @@ export default function App() {
     () => APP_BOOT.mainView,
   )
   const [styleProfiles, setStyleProfiles] = useState<StyleProfile[]>([])
+  const [styleDefaultProfileId, setStyleDefaultProfileId] = useState<string>("none")
   /**
    * 點擊工具後建立的「暫存對話」，尚未加入 sessions。
    * 送出第一筆訊息時才正式 commit 進 sessions。
@@ -613,6 +614,21 @@ export default function App() {
     }
     return sessions.find((s) => s.id === activeId)
   }, [sessions, activeId, pendingToolSession])
+  const sortedStyleProfiles = useMemo(() => {
+    const defaultId = styleDefaultProfileId
+    const getCreatedAt = (v?: string) => {
+      const t = Date.parse(v ?? "")
+      return Number.isNaN(t) ? 0 : t
+    }
+    return [...styleProfiles].sort((a, b) => {
+      if (a.id === defaultId && b.id !== defaultId) return -1
+      if (b.id === defaultId && a.id !== defaultId) return 1
+      const av = a.version ?? -1
+      const bv = b.version ?? -1
+      if (av !== bv) return bv - av
+      return getCreatedAt(b.created_at) - getCreatedAt(a.created_at)
+    })
+  }, [styleDefaultProfileId, styleProfiles])
   const messages = activeSession?.messages ?? []
   const activeStreaming = activeSession?.isRunning ?? false
   const activeStreamPrimed = activeSession?.streamPrimed ?? false
@@ -857,6 +873,7 @@ export default function App() {
         const status = await fetchStyleLearningStatus(baseUrl)
         if (cancelled) return
         setStyleProfiles(status.profile?.profiles ?? [])
+        setStyleDefaultProfileId(status.profile?.default_profile_id ?? "none")
       } catch {
         // 風格學習功能不可用時不阻斷主流程
       }
@@ -1738,7 +1755,7 @@ export default function App() {
                     title="選擇是否套用歷史風格偏好"
                   >
                     <option value="none">不使用風格偏好</option>
-                    {styleProfiles.map((p) => (
+                    {sortedStyleProfiles.map((p) => (
                       <option key={p.id} value={p.id}>
                         {p.name}
                       </option>
@@ -1769,7 +1786,10 @@ export default function App() {
                 savedMainScrollTop={uiScroll.settingsMain}
                 onStyleLearningChanged={() => {
                   void fetchStyleLearningStatus(baseUrl)
-                    .then((status) => setStyleProfiles(status.profile?.profiles ?? []))
+                    .then((status) => {
+                      setStyleProfiles(status.profile?.profiles ?? [])
+                      setStyleDefaultProfileId(status.profile?.default_profile_id ?? "none")
+                    })
                     .catch(() => {})
                 }}
               />

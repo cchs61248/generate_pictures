@@ -215,6 +215,24 @@ export function SettingsPage({
     return profile.profiles.find((p) => p.id === profile.default_profile_id) ?? null
   }, [styleStatus])
 
+  const sortedProfiles = useMemo(() => {
+    const profile = styleStatus?.profile
+    if (!profile) return []
+    const defaultId = profile.default_profile_id
+    const getCreatedAt = (v?: string) => {
+      const t = Date.parse(v ?? "")
+      return Number.isNaN(t) ? 0 : t
+    }
+    return [...profile.profiles].sort((a, b) => {
+      if (a.id === defaultId && b.id !== defaultId) return -1
+      if (b.id === defaultId && a.id !== defaultId) return 1
+      const av = a.version ?? -1
+      const bv = b.version ?? -1
+      if (av !== bv) return bv - av
+      return getCreatedAt(b.created_at) - getCreatedAt(a.created_at)
+    })
+  }, [styleStatus])
+
   const handleExtract = async () => {
     setStyleBusy(true)
     setStyleMsg(null)
@@ -700,7 +718,7 @@ export function SettingsPage({
             <section className="token-section">
               <h3 className="token-section-title">歷史偏好列表（可回滾）</h3>
               <div className="style-profile-list">
-                {(styleStatus?.profile.profiles ?? []).map((p) => (
+                {sortedProfiles.map((p) => (
                   <div key={p.id} className="style-profile-item">
                     <div>
                       <p><strong>{p.name}</strong></p>

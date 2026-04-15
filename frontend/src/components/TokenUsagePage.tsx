@@ -48,6 +48,7 @@ const SOURCE_LABEL_MAP: Record<string, string> = {
   stage2_json: "生成圖片腳本",
   stage3_image: "生成電商圖片",
   image_thread: "修改圖片",
+  style_learning_extract: "風格學習",
 }
 
 function sourceLabel(source: string): string {
