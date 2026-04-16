@@ -13,6 +13,9 @@ from fastapi.responses import StreamingResponse
 
 def project_root() -> str:
     """回傳專案根目錄絕對路徑（api/ 的上層）。"""
+    runtime_root = os.environ.get("APP_RUNTIME_ROOT", "").strip()
+    if runtime_root:
+        return os.path.abspath(runtime_root)
     return os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
 
@@ -81,6 +84,7 @@ def apply_session_sample_path(config, session_id: str | None):
     root = project_root()
     sid = safe_session_id(session_id)
     config.sample_image_path = sample_image_path_for_session(root, sid)
+    config.picture_dir = os.path.join(root, "picture")
     config.session_id = sid or ""
     if sid:
         template_dir = os.path.join(root, "template_json")

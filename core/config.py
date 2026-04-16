@@ -240,7 +240,12 @@ def parse_config(stage3_only_flag: bool) -> AppConfig:
         or stage3_only_flag
     )
 
-    project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    runtime_root = (os.environ.get("APP_RUNTIME_ROOT") or "").strip()
+    project_root = (
+        os.path.abspath(runtime_root)
+        if runtime_root
+        else os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    )
     sample_image_path = os.path.join(project_root, "sample.jpg")
     final_output_path = os.path.join(project_root, "final_output.json")
     picture_dir = os.path.join(project_root, "picture")

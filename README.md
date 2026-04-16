@@ -60,6 +60,59 @@ npm run dev
 
 ---
 
+## 打包成 EXE 資料夾（onedir，含 Playwright 自動開頁）
+
+以下流程會產出一個 `dist/gnerate_pictures_launcher/` 資料夾，執行後會：
+
+- 在 terminal 視窗啟動後端 API（`127.0.0.1:8000`）
+- 啟動前端靜態站台（`127.0.0.1:5173`）
+- 用內建 Playwright Chromium 以螢幕尺寸啟動並開啟首頁（不使用使用者本機瀏覽器）
+
+### 一次性準備（Windows PowerShell）
+
+```powershell
+# 1) 安裝前端依賴並打包前端
+cd frontend
+npm install
+npm run build
+cd ..
+
+# 2) 安裝打包與瀏覽器自動化工具（使用專案 .venv）
+.\.venv\Scripts\python.exe -m pip install pyinstaller
+```
+
+```powershell
+# 3) 安裝專案依賴（含 playwright）
+.\.venv\Scripts\python.exe -m pip install -r requirements.txt
+
+# 4) 安裝 Playwright Chromium 到套件內（打包時會一起帶入）
+$env:PLAYWRIGHT_BROWSERS_PATH='0'
+.\.venv\Scripts\python.exe -m playwright install chromium
+```
+
+### 產生 EXE
+
+```powershell
+.\.venv\Scripts\pyinstaller.exe --noconfirm --clean --console --name gnerate_pictures_launcher --add-data "frontend/dist;frontend/dist" --add-data ".venv/Lib/site-packages/playwright/driver/package/.local-browsers;playwright/driver/package/.local-browsers" launcher.py
+```
+
+### 執行 EXE
+
+```powershell
+cd .\dist\gnerate_pictures_launcher
+.\gnerate_pictures_launcher.exe
+```
+
+### 重新打包前提醒
+
+- 若前端程式有改動，請先重新執行 `cd frontend && npm run build`
+- 若後端有新增套件，先安裝到 `.venv` 後再執行 PyInstaller
+- 第一次在新機器執行前，需確保 `.env` 已設定 API 金鑰
+- 若有更新 Playwright 版本，請重新執行「步驟 4」並重新打包
+- 執行期資料會建立在「你啟動 exe 時的當前資料夾」（例如 `uploads/`、`picture/`、`data/`）
+
+---
+
 ## 專案架構
 
 ```

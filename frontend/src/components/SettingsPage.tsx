@@ -113,6 +113,10 @@ function formatStyleHistoryTimestamp(ts: string): string {
   }
 }
 
+function formatQueueTimestamp(ts: string): string {
+  return formatStyleHistoryTimestamp(ts)
+}
+
 function styleHistoryActionText(item: StyleLearningHistoryItem): string {
   const typeRaw = String(item.type ?? "")
   const deletedProfileName = String(item.deleted_profile_name ?? "").trim()
@@ -760,7 +764,6 @@ export function SettingsPage({
                     <tr>
                       <th />
                       <th>時間</th>
-                      <th>Session</th>
                       <th>使用者提問</th>
                       <th>LLM 回應</th>
                       <th>標記</th>
@@ -783,8 +786,7 @@ export function SettingsPage({
                             }}
                           />
                         </td>
-                        <td className="token-ts">{q.timestamp}</td>
-                        <td className="token-source">{q.session_id}</td>
+                        <td className="token-ts">{formatQueueTimestamp(q.timestamp)}</td>
                         <td className="style-cell-text">{q.user_text}</td>
                         <td className="style-cell-text">{q.model_text}</td>
                         <td className="token-source">
@@ -796,7 +798,7 @@ export function SettingsPage({
                     ))}
                     {styleQueue.length === 0 ? (
                       <tr>
-                        <td colSpan={6} className="settings-page-hint">本頁無資料</td>
+                        <td colSpan={5} className="settings-page-hint">本頁無資料</td>
                       </tr>
                     ) : null}
                   </tbody>

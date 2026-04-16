@@ -66,3 +66,4 @@ data/session_state.json
 /data
 /.playwright-mcp
 cookies.json
+*.spec

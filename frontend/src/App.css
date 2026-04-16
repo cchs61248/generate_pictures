@@ -1851,26 +1851,21 @@
 
 .token-table--style-queue th:nth-child(2),
 .token-table--style-queue td:nth-child(2) {
-  width: 15%;
+  width: 18%;
 }
 
 .token-table--style-queue th:nth-child(3),
 .token-table--style-queue td:nth-child(3) {
-  width: 12%;
+  width: 28%;
 }
 
 .token-table--style-queue th:nth-child(4),
 .token-table--style-queue td:nth-child(4) {
-  width: 28%;
+  width: 44%;
 }
 
 .token-table--style-queue th:nth-child(5),
 .token-table--style-queue td:nth-child(5) {
-  width: 32%;
-}
-
-.token-table--style-queue th:nth-child(6),
-.token-table--style-queue td:nth-child(6) {
   width: 10%;
 }
 
