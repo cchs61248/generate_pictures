@@ -60,6 +60,71 @@ npm run dev
 
 ---
 
+## 雲端部署（Railway：前後端都上雲）
+
+此方案使用同一個 Git Repo 建立兩個 Railway Service：
+
+- `gnerate-pictures-backend`（FastAPI）
+- `gnerate-pictures-frontend`（Vite build 後以靜態站提供）
+
+### 1) 建立 Backend Service（Railway）
+
+- Source Repo：本專案 repo
+- Root Directory：`/`（專案根目錄）
+- Start Command：
+
+```bash
+python -m uvicorn api.server:app --host 0.0.0.0 --port $PORT
+```
+
+#### Backend 必填環境變數
+
+- `GOOGLE_API_KEY` 或 `GEMINI_API_KEY`
+- `GEMINI_BACKEND`（建議 `apikey` 或 `hybrid`）
+- `TAVILY_API_KEY`（若你要啟用搜尋）
+- 其他你現有 `.env` 需要的變數
+
+#### Backend 持久化（重要）
+
+本專案會寫入 `uploads/`、`picture/`、`template_json/`、`data/`。  
+請在 Railway Backend Service 掛一個 Volume（例如掛載點：`/data`），並設定：
+
+- `APP_RUNTIME_ROOT=/data`
+
+這樣執行期資料就會寫到持久化磁碟，不會隨 deploy 消失。
+
+### 2) 建立 Frontend Service（Railway）
+
+- Source Repo：同一個 repo
+- Root Directory：`frontend`
+- Build Command：`npm install && npm run build`
+- Start Command：`npm run start`
+
+Frontend 需要設定：
+
+- `VITE_API_BASE_URL=https://<你的-backend-railway-domain>`
+
+> `VITE_API_BASE_URL` 會在前端 build 時寫入 bundle，修改後需重新部署 frontend service。
+
+### 3) CORS 與連線檢查
+
+目前後端 CORS 為 `allow_origins=["*"]`，可直接從 Railway 前端網域呼叫。  
+部署後建議先做 smoke test：
+
+1. 開啟 frontend 網址
+2. 上傳商品圖
+3. 送出一次生成（確認 `/run-stream` 正常）
+4. 檢查圖片可由 `/images/{filename}` 讀到
+
+### 4) 建議部署順序
+
+1. 先部署 backend 並確認健康
+2. 再部署 frontend（指向 backend 網址）
+3. 之後每次改前端 API 網址，重新 deploy frontend
+4. 每次改後端程式或模型設定，重新 deploy backend
+
+---
+
 ## 打包成 EXE 資料夾（onedir，含 Playwright 自動開頁）
 
 以下流程會產出一個 `dist/gnerate_pictures_launcher/` 資料夾，執行後會：
