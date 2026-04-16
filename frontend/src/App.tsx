@@ -52,7 +52,7 @@ function newId(): string {
   return crypto.randomUUID()
 }
 
-function createSession(toolId?: string): ChatSession {
+function createSession(toolId?: string, initialStyleProfileId = "none"): ChatSession {
   const toolTitle = toolId ? getToolById(toolId)?.chatTitle : undefined
   return {
     id: newId(),
@@ -64,7 +64,7 @@ function createSession(toolId?: string): ChatSession {
     taskCompleted: false,
     clearOnNextSend: false,
     toolId,
-    selectedStyleProfileId: "none",
+    selectedStyleProfileId: initialStyleProfileId || "none",
   }
 }
 
@@ -331,6 +331,16 @@ export default function App() {
   const [settingsTab, setSettingsTab] = useState<"env" | "style">("env")
   const [styleProfiles, setStyleProfiles] = useState<StyleProfile[]>([])
   const [styleDefaultProfileId, setStyleDefaultProfileId] = useState<string>("none")
+  const styleProfileIdSet = useMemo(
+    () => new Set(styleProfiles.map((p) => p.id)),
+    [styleProfiles],
+  )
+  const effectiveDefaultStyleProfileId = useMemo(() => {
+    if (styleDefaultProfileId === "none") return "none"
+    return styleProfileIdSet.has(styleDefaultProfileId)
+      ? styleDefaultProfileId
+      : "none"
+  }, [styleDefaultProfileId, styleProfileIdSet])
   /**
    * 點擊工具後建立的「暫存對話」，尚未加入 sessions。
    * 送出第一筆訊息時才正式 commit 進 sessions。
@@ -630,6 +640,17 @@ export default function App() {
       return getCreatedAt(b.created_at) - getCreatedAt(a.created_at)
     })
   }, [styleDefaultProfileId, styleProfiles])
+  const resolveStyleProfileId = useCallback(
+    (session: ChatSession | null | undefined): string => {
+      const current = session?.selectedStyleProfileId
+      if (current && current !== "none") {
+        return styleProfileIdSet.has(current) ? current : effectiveDefaultStyleProfileId
+      }
+      if (current === "none") return "none"
+      return effectiveDefaultStyleProfileId
+    },
+    [effectiveDefaultStyleProfileId, styleProfileIdSet],
+  )
   const messages = activeSession?.messages ?? []
   const activeStreaming = activeSession?.isRunning ?? false
   const activeStreamPrimed = activeSession?.streamPrimed ?? false
@@ -893,6 +914,31 @@ export default function App() {
   }, [baseUrl])
 
   useEffect(() => {
+    if (effectiveDefaultStyleProfileId === "none") return
+    setPendingToolSession((p) => {
+      if (!p) return p
+      if ((p.selectedStyleProfileId ?? "none") !== "none") return p
+      if (p.messages.length > 0) return p
+      return {
+        ...p,
+        selectedStyleProfileId: effectiveDefaultStyleProfileId,
+        updatedAt: Date.now(),
+      }
+    })
+    setSessions((prev) =>
+      prev.map((s) => {
+        if ((s.selectedStyleProfileId ?? "none") !== "none") return s
+        if (s.messages.length > 0) return s
+        return {
+          ...s,
+          selectedStyleProfileId: effectiveDefaultStyleProfileId,
+          updatedAt: Date.now(),
+        }
+      }),
+    )
+  }, [effectiveDefaultStyleProfileId, setSessions])
+
+  useEffect(() => {
     const handleStorage = (ev: StorageEvent) => {
       if (ev.key !== STORAGE_KEY) return
       const next = loadPersistedState()
@@ -929,7 +975,7 @@ export default function App() {
         restoreComposerState(existingPending.id)
         return
       }
-      const s = createSession(toolId)
+      const s = createSession(toolId, effectiveDefaultStyleProfileId)
       // 暫存，不加入 sessions；等送出第一筆訊息時才 commit
       setPendingToolSession(s)
       setActiveIdOnly(s.id)
@@ -937,6 +983,7 @@ export default function App() {
     },
     [
       activeId,
+      effectiveDefaultStyleProfileId,
       flushMessagesScroll,
       persistComposerState,
       restoreComposerState,
@@ -1229,7 +1276,7 @@ export default function App() {
       }
 
       const sessionId = activeId
-      const selectedStyleProfileId = activeSession?.selectedStyleProfileId ?? "none"
+      const selectedStyleProfileId = resolveStyleProfileId(activeSession)
       patchSession(sessionId, (s) => ({
         ...s,
         isRunning: true,
@@ -1509,7 +1556,7 @@ export default function App() {
             },
           ])
         }
-      }, aborter.signal, sessionId, activeSession?.selectedStyleProfileId ?? "none")
+      }, aborter.signal, sessionId, resolveStyleProfileId(activeSession))
     } catch (e) {
       if (e instanceof DOMException && e.name === "AbortError") {
         patchSessionMessages(sessionId, (m) => [
@@ -1608,7 +1655,7 @@ export default function App() {
         imageThreadLocked: true,
         referenceImageName: undefined,
         threadSourceKey: sourceKey,
-        selectedStyleProfileId: activeSession?.selectedStyleProfileId ?? "none",
+        selectedStyleProfileId: resolveStyleProfileId(activeSession),
       }
       setMainView("chat")
       // 同步提交：避免 (1) 暫存主對話先被清掉導致 activeId 找不到 session
@@ -1751,7 +1798,7 @@ export default function App() {
                 {mainView === "chat" ? (
                   <select
                     className="app-header-style-select"
-                    value={activeSession?.selectedStyleProfileId ?? "none"}
+                    value={resolveStyleProfileId(activeSession)}
                     onChange={(e) => {
                       const profileId = e.target.value
                       patchActiveSession((s) => ({
