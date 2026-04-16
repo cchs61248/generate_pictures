@@ -1798,6 +1798,7 @@
 
 .token-table {
   width: 100%;
+  table-layout: fixed;
   border-collapse: collapse;
   font-size: 0.84rem;
 }
@@ -1807,7 +1808,132 @@
   padding: 0.5rem 0.75rem;
   text-align: left;
   border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+  white-space: normal;
+  overflow-wrap: break-word;
+  word-break: break-word;
+  min-width: 0;
+  vertical-align: top;
+}
+
+.token-table .token-num {
   white-space: nowrap;
+}
+
+.token-table .style-cell-text {
+  max-width: none;
+}
+
+/* 風格學習：回滾與觀測歷史 */
+.token-table--style-history th:nth-child(1),
+.token-table--style-history td:nth-child(1) {
+  width: 36%;
+}
+
+.token-table--style-history th:nth-child(2),
+.token-table--style-history td:nth-child(2) {
+  width: 16%;
+}
+
+.token-table--style-history th:nth-child(3),
+.token-table--style-history td:nth-child(3) {
+  width: 48%;
+}
+
+.token-table--style-history td:nth-child(1).token-ts {
+  white-space: nowrap;
+}
+
+/* 風格學習：Queue 列表 */
+.token-table--style-queue th:nth-child(1),
+.token-table--style-queue td:nth-child(1) {
+  width: 3%;
+}
+
+.token-table--style-queue th:nth-child(2),
+.token-table--style-queue td:nth-child(2) {
+  width: 15%;
+}
+
+.token-table--style-queue th:nth-child(3),
+.token-table--style-queue td:nth-child(3) {
+  width: 12%;
+}
+
+.token-table--style-queue th:nth-child(4),
+.token-table--style-queue td:nth-child(4) {
+  width: 28%;
+}
+
+.token-table--style-queue th:nth-child(5),
+.token-table--style-queue td:nth-child(5) {
+  width: 32%;
+}
+
+.token-table--style-queue th:nth-child(6),
+.token-table--style-queue td:nth-child(6) {
+  width: 10%;
+}
+
+/* Token 用量：彙總 */
+.token-table--token-summary th:nth-child(1),
+.token-table--token-summary td:nth-child(1) {
+  width: 30%;
+}
+
+.token-table--token-summary th:nth-child(2),
+.token-table--token-summary td:nth-child(2) {
+  width: 11%;
+}
+
+.token-table--token-summary th:nth-child(3),
+.token-table--token-summary td:nth-child(3) {
+  width: 13%;
+}
+
+.token-table--token-summary th:nth-child(4),
+.token-table--token-summary td:nth-child(4) {
+  width: 13%;
+}
+
+.token-table--token-summary th:nth-child(5),
+.token-table--token-summary td:nth-child(5) {
+  width: 13%;
+}
+
+.token-table--token-summary th:nth-child(6),
+.token-table--token-summary td:nth-child(6) {
+  width: 20%;
+}
+
+/* Token 用量：明細 */
+.token-table--token-detail th:nth-child(1),
+.token-table--token-detail td:nth-child(1) {
+  width: 18%;
+}
+
+.token-table--token-detail th:nth-child(2),
+.token-table--token-detail td:nth-child(2) {
+  width: 18%;
+}
+
+.token-table--token-detail th:nth-child(3),
+.token-table--token-detail td:nth-child(3) {
+  width: 24%;
+}
+
+.token-table--token-detail th:nth-child(4),
+.token-table--token-detail td:nth-child(4) {
+  width: 13%;
+}
+
+.token-table--token-detail th:nth-child(5),
+.token-table--token-detail td:nth-child(5) {
+  width: 13%;
+}
+
+.token-table--token-detail th:nth-child(6),
+.token-table--token-detail td:nth-child(6) {
+  width: 14%;
 }
 
 .token-table th {

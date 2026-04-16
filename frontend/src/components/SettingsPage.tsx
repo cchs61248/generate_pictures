@@ -39,6 +39,13 @@ type Props = {
 
 const GEMINI_BACKEND_OPTIONS = ["apikey", "hybrid"] as const
 const STYLE_PROFILE_LIMIT = 5
+const STYLE_HISTORY_TYPE_LABELS: Record<string, string> = {
+  rollback: "回滾",
+  queue_restore: "恢復到待萃取",
+  extract: "萃取",
+  profile_delete: "刪除偏好",
+  profile_rename: "偏好改名",
+}
 
 function clampMaxLlmSearchCallsInput(raw: string): string {
   const v = raw.trim()
@@ -69,6 +76,60 @@ function modelSelectOptions(
     return [...choices, { value: row.value, label: `${row.value}（自訂）` }]
   }
   return choices
+}
+
+function styleHistoryTypeLabel(typeValue: unknown): string {
+  const raw = String(typeValue ?? "")
+  return STYLE_HISTORY_TYPE_LABELS[raw] ?? raw
+}
+
+function formatStyleHistoryTimestamp(ts: string): string {
+  try {
+    const d = new Date(ts)
+    if (Number.isNaN(d.getTime())) return ts
+    const pad = (n: number) => String(n).padStart(2, "0")
+    return (
+      `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())} ` +
+      `${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`
+    )
+  } catch {
+    return ts
+  }
+}
+
+function styleHistoryActionText(item: StyleLearningHistoryItem): string {
+  const typeRaw = String(item.type ?? "")
+  const deletedProfileName = String(item.deleted_profile_name ?? "").trim()
+  const toProfileName = String(item.to_profile_name ?? "").trim()
+  const profileName = String(item.profile_name ?? "").trim()
+  const oldName = String(item.old_name ?? "").trim()
+  const newName = String(item.new_name ?? "").trim()
+  const restoredCountRaw = Number(item.restored_count ?? item.restored ?? 0)
+  const restoredCount = Number.isFinite(restoredCountRaw) ? restoredCountRaw : 0
+
+  if (typeRaw === "profile_delete") {
+    return deletedProfileName
+      ? `刪除「${deletedProfileName}」`
+      : "刪除偏好"
+  }
+  if (typeRaw === "rollback") {
+    return toProfileName
+      ? `回滾「${toProfileName}」`
+      : "回滾偏好"
+  }
+  if (typeRaw === "profile_rename") {
+    if (oldName && newName) return `將「${oldName}」改名為「${newName}」`
+    return "偏好改名"
+  }
+  if (typeRaw === "queue_restore") {
+    if (restoredCount <= 0) return "恢復 queue 到待萃取"
+    if (restoredCount === 1) return "恢復一條 queue 到待萃取"
+    return `恢復 ${restoredCount} 條 queue 到待萃取`
+  }
+  if (typeRaw === "extract") {
+    return profileName ? `萃取完成「${profileName}」` : "執行萃取"
+  }
+  return JSON.stringify(item)
 }
 
 export function SettingsPage({
@@ -661,7 +722,7 @@ export function SettingsPage({
                 </button>
               </div>
               <div className="token-table-wrap">
-                <table className="token-table">
+                <table className="token-table token-table--style-queue">
                   <thead>
                     <tr>
                       <th />
@@ -726,58 +787,6 @@ export function SettingsPage({
                     className="token-page-btn"
                     disabled={queuePage >= queueTotalPages}
                     onClick={() => void loadStyleQueue(queuePage + 1, queueScope)}
-                  >
-                    下一頁
-                  </button>
-                </div>
-              </div>
-            </section>
-
-            <section className="token-section">
-              <h3 className="token-section-title">回滾與觀測歷史</h3>
-              <div className="token-table-wrap">
-                <table className="token-table">
-                  <thead>
-                    <tr>
-                      <th>時間</th>
-                      <th>類型</th>
-                      <th>內容</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {historyRows.map((h, idx) => (
-                      <tr key={`${h.timestamp}-${h.type}-${idx}`}>
-                        <td className="token-ts">{String(h.timestamp ?? "")}</td>
-                        <td className="token-source">{String(h.type ?? "")}</td>
-                        <td className="style-cell-text">{JSON.stringify(h)}</td>
-                      </tr>
-                    ))}
-                    {historyRows.length === 0 ? (
-                      <tr>
-                        <td colSpan={3} className="settings-page-hint">本頁無資料</td>
-                      </tr>
-                    ) : null}
-                  </tbody>
-                </table>
-              </div>
-              <div className="token-pagination">
-                <div className="token-pagination-meta">
-                  第 {historyPage} / {historyTotalPages} 頁
-                </div>
-                <div className="token-pagination-actions">
-                  <button
-                    type="button"
-                    className="token-page-btn"
-                    disabled={historyPage <= 1}
-                    onClick={() => void loadStyleHistory(historyPage - 1)}
-                  >
-                    上一頁
-                  </button>
-                  <button
-                    type="button"
-                    className="token-page-btn"
-                    disabled={historyPage >= historyTotalPages}
-                    onClick={() => void loadStyleHistory(historyPage + 1)}
                   >
                     下一頁
                   </button>
@@ -858,6 +867,63 @@ export function SettingsPage({
                     </div>
                   </div>
                 ))}
+              </div>
+            </section>
+
+            <section className="token-section">
+              <h3 className="token-section-title">回滾與觀測歷史</h3>
+              <div className="token-table-wrap">
+                <table className="token-table token-table--style-history">
+                  <thead>
+                    <tr>
+                      <th>時間</th>
+                      <th>類型</th>
+                      <th>內容</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {historyRows.map((h, idx) => (
+                      <tr key={`${h.timestamp}-${h.type}-${idx}`}>
+                        <td
+                          className="token-ts"
+                          title={String(h.timestamp ?? "")}
+                        >
+                          {formatStyleHistoryTimestamp(String(h.timestamp ?? ""))}
+                        </td>
+                        <td className="token-source">{styleHistoryTypeLabel(h.type)}</td>
+                        <td className="style-cell-text">{styleHistoryActionText(h)}</td>
+                      </tr>
+                    ))}
+                    {historyRows.length === 0 ? (
+                      <tr>
+                        <td colSpan={3} className="settings-page-hint">本頁無資料</td>
+                      </tr>
+                    ) : null}
+                  </tbody>
+                </table>
+              </div>
+              <div className="token-pagination">
+                <div className="token-pagination-meta">
+                  第 {historyPage} / {historyTotalPages} 頁
+                </div>
+                <div className="token-pagination-actions">
+                  <button
+                    type="button"
+                    className="token-page-btn"
+                    disabled={historyPage <= 1}
+                    onClick={() => void loadStyleHistory(historyPage - 1)}
+                  >
+                    上一頁
+                  </button>
+                  <button
+                    type="button"
+                    className="token-page-btn"
+                    disabled={historyPage >= historyTotalPages}
+                    onClick={() => void loadStyleHistory(historyPage + 1)}
+                  >
+                    下一頁
+                  </button>
+                </div>
               </div>
             </section>
           </div>

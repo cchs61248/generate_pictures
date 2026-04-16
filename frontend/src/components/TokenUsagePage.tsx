@@ -391,7 +391,7 @@ export function TokenUsagePage({
                   scheduleTableScrollXPersist("summary", el.scrollLeft)
                 }}
               >
-                <table className="token-table">
+                <table className="token-table token-table--token-summary">
                   <thead>
                     <tr>
                       <th>模型</th>
@@ -476,7 +476,7 @@ export function TokenUsagePage({
                   scheduleTableScrollXPersist("detail", el.scrollLeft)
                 }}
               >
-                <table className="token-table">
+                <table className="token-table token-table--token-detail">
                   <thead>
                     <tr>
                       <th>時間（本地）</th>
