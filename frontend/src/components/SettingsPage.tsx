@@ -67,6 +67,22 @@ function normalizeGeminiBackend(raw: string): string {
     : "apikey"
 }
 
+function isApiKeyEnvKey(key: string): boolean {
+  return key.toUpperCase().includes("API_KEY")
+}
+
+function maskMiddleWithStars(value: string): string {
+  const raw = value ?? ""
+  if (raw.length <= 4) return "*".repeat(raw.length)
+  if (raw.length <= 8) {
+    return `${raw.slice(0, 2)}${"*".repeat(Math.max(1, raw.length - 4))}${raw.slice(-2)}`
+  }
+  const visiblePrefix = 4
+  const visibleSuffix = 4
+  const hiddenLen = raw.length - visiblePrefix - visibleSuffix
+  return `${raw.slice(0, visiblePrefix)}${"*".repeat(Math.max(4, hiddenLen))}${raw.slice(-visibleSuffix)}`
+}
+
 function modelSelectOptions(
   row: EnvVariableRow,
   choices: ModelChoiceOption[],
@@ -154,6 +170,7 @@ export function SettingsPage({
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [savedOk, setSavedOk] = useState(false)
+  const [activeApiKeyInputKey, setActiveApiKeyInputKey] = useState<string | null>(null)
   const [styleStatus, setStyleStatus] = useState<StyleLearningStatus | null>(null)
   const [styleQueue, setStyleQueue] = useState<StyleLearningQueueItem[]>([])
   const [queueScope, setQueueScope] = useState<"pending" | "extracted">("pending")
@@ -598,7 +615,23 @@ export function SettingsPage({
                       type="text"
                       autoComplete="off"
                       spellCheck={false}
-                      value={row.value}
+                      value={
+                        isApiKeyEnvKey(row.key) && activeApiKeyInputKey !== row.key
+                          ? maskMiddleWithStars(row.value)
+                          : row.value
+                      }
+                      onFocus={() => {
+                        if (isApiKeyEnvKey(row.key)) {
+                          setActiveApiKeyInputKey(row.key)
+                        }
+                      }}
+                      onBlur={() => {
+                        if (isApiKeyEnvKey(row.key)) {
+                          setActiveApiKeyInputKey((prev) =>
+                            prev === row.key ? null : prev,
+                          )
+                        }
+                      }}
                       onChange={(e) => setValue(row.key, e.target.value)}
                     />
                   )}
