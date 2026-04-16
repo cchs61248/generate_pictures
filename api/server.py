@@ -16,10 +16,11 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from api.deps import project_root
-from api.routers import session, settings, media, token_usage
+from api.routers import frontend_log, media, session, settings, token_usage
 from api.routers.tools.ecommerce_image import router as ecommerce_image_router_module
 from api.routers.tools.ecommerce_image.image_thread import router as image_thread_router_module
 from api.routers.tools.ecommerce_image.style_learning import router as style_learning_router_module
+from core.app_logging import setup_app_logging
 from core.config import sync_managed_env_from_dotenv
 
 app = FastAPI(title="Generate Pictures API", version="0.1.0")
@@ -27,7 +28,9 @@ app = FastAPI(title="Generate Pictures API", version="0.1.0")
 
 @app.on_event("startup")
 async def startup_load_env():
-    sync_managed_env_from_dotenv(os.path.join(project_root(), ".env"))
+    root = project_root()
+    setup_app_logging(root)
+    sync_managed_env_from_dotenv(os.path.join(root, ".env"))
 
 
 app.add_middleware(
@@ -43,6 +46,7 @@ app.include_router(session.router)
 app.include_router(settings.router)
 app.include_router(media.router)
 app.include_router(token_usage.router)
+app.include_router(frontend_log.router)
 
 # ── 工具 Router（每個工具獨立掛載）────────────────────────────────────────────
 app.include_router(ecommerce_image_router_module.router)

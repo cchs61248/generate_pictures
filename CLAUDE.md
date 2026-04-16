@@ -11,6 +11,7 @@
 目前已上線工具：**AI 電商圖文助手**（工具 id：`ecommerce-image`）。
 
 使用者須先上傳商品圖，可再輸入描述或網址，並可附加 **txt / pdf / doc / docx / md** 說明文件，一併送入 pipeline。
+> 注意：API 允許上傳 `.doc`，但目前文件抽文服務僅實作 `.txt/.md/.pdf/.docx`，`.doc` 內容不會被抽出供 LLM 使用。
 各階段與子圖片討論串的 Gemini 呼叫會透過 `core/token_logger` 累計寫入 `data/token_usage.json`，並可由 `GET /token-usage` 查詢。
 
 ---
@@ -39,7 +40,7 @@ npm run dev
 core/          通用基礎設施（不含業務邏輯）
 services/      通用服務（搜尋、影像 API、文件文字抽取）
 api/
-  server.py    只做 app 建立、CORS、startup、include_router
+  server.py    只做 app 建立、CORS、startup、include_router（含工具主路由與子路由）
   deps.py      跨 router 共用工具函式
   routers/
     session.py GET/PUT /session-state
@@ -54,7 +55,8 @@ api/
         prompts/
         services/
         utils/
-        image_thread/   子圖片討論串（套件位於 ecommerce_image 下，但在 server.py 單獨 include_router）
+        image_thread/   子圖片討論串（位於 ecommerce_image 下，於 server.py 單獨 include_router）
+        style_learning/ 風格學習管理子路由（位於 ecommerce_image 下，於 server.py 單獨 include_router）
 ```
 
 ### 通用基礎設施（core/ 與 services/）
@@ -82,9 +84,11 @@ api/
 | `prompts/json_schema.py` | P1~P9 結構化 prompt 模板 |
 | `prompts/image_style.py` | 電商視覺風格 prompt |
 | `services/image_process.py` | prompt 組合與檔名安全化 |
+| `services/style_learning.py` | 風格學習 queue/profile/history 管理、萃取與回滾 |
 | `utils/json_utils.py` | JSON 抽取、驗證（含 `EXPECTED_MAINS`）、LLM 修復 |
 | `image_thread/router.py` | `POST /image-thread/init`、`POST /chat/image-thread`（SSE）；token 紀錄 |
 | `image_thread/service.py` | image thread 歷史讀寫 |
+| `style_learning/router.py` | style-learning 狀態、queue、extract、rollback、profile 管理 |
 
 ---
 
@@ -102,7 +106,7 @@ api/routers/tools/<new_tool>/
 └── utils/          ← 若需要工具專屬工具函式
 ```
 
-若工具有獨立子路由模組（類似 `image_thread`），可在 `server.py` 另起一行 `include_router`，與主工具 router 分開掛載、標籤分離。
+若工具有獨立子路由模組（類似 `image_thread` / `style_learning`），可在 `server.py` 另起一行 `include_router`，與主工具 router 分開掛載、標籤分離。
 
 引用通用層：`from core.xxx import ...`、`from services.xxx import ...`
 
@@ -115,7 +119,7 @@ api/routers/tools/<new_tool>/
 - **API 合約**：`frontend/src/api.ts` — 所有 HTTP/SSE 呼叫、圖片／文件與 session 清理等
 - **型別**：`frontend/src/types/chatSession.ts`
 - **狀態**：`frontend/src/chatStorage.ts`（localStorage 與後端 `/session-state` 協調）
-- **全畫面型 UI**：`SettingsPage.tsx`（環境設定）、`TokenUsagePage.tsx`（用量查詢）
+- **全畫面型 UI**：`SettingsPage.tsx`（環境設定 + 風格學習管理）、`TokenUsagePage.tsx`（用量查詢）
 
 新增工具時，在 `tools.ts` 的 `TOOLS` 陣列新增一筆 `ToolDefinition` 即可出現在側欄。
 
@@ -141,13 +145,22 @@ api/routers/tools/<new_tool>/
 | POST | `/run-stream` | SSE 串流執行電商圖文生成 |
 | POST | `/image-thread/init` | 初始化子討論串 |
 | POST | `/chat/image-thread` | SSE 子討論串圖片修改 |
+| GET | `/tools/ecommerce-image/style-learning/status` | 取得風格學習狀態（目前預設 profile、queue 統計） |
+| GET | `/tools/ecommerce-image/style-learning/queue` | 分頁查詢學習事件佇列（`pending/extracted/all`） |
+| DELETE | `/tools/ecommerce-image/style-learning/queue` | 批次刪除 queue 事件 |
+| POST | `/tools/ecommerce-image/style-learning/queue/restore` | 將已 extracted 事件復原為 pending |
+| GET | `/tools/ecommerce-image/style-learning/history` | 分頁查詢風格學習操作歷史 |
+| POST | `/tools/ecommerce-image/style-learning/extract` | 由 pending 事件萃取新 profile |
+| POST | `/tools/ecommerce-image/style-learning/rollback` | 切換預設 profile（回滾） |
+| DELETE | `/tools/ecommerce-image/style-learning/profile` | 刪除指定 profile |
+| PUT | `/tools/ecommerce-image/style-learning/profile` | 重新命名 profile |
 
 ---
 
 ## 重要開發慣例
 
-- **`api/server.py` 不含業務邏輯**，只做 app 建立與 router 掛載（含 `ecommerce_image` 與 `image_thread` 兩個 router）
-- **`api/deps.py`** 提供跨 router 共用函式，例如：`project_root`、`safe_session_id`、`readable_error`、`sample_image_path_for_session`、`require_session_upload_exists`、`apply_session_sample_path`、`doc_upload_path`、`load_session_document_texts`、`safe_filename_part`、`sse_streaming_response`
+- **`api/server.py` 不含業務邏輯**，只做 app 建立與 router 掛載（含 `ecommerce_image`、`image_thread`、`style_learning`）
+- **`api/deps.py`** 提供跨 router 共用函式，例如：`project_root`、`safe_session_id`、`readable_error`、`sample_image_path_for_session`、`require_session_upload_exists`、`apply_session_sample_path`、`doc_upload_path`、`load_session_document_texts`、`load_session_documents`、`safe_filename_part`、`sse_streaming_response`
 - **工具業務邏輯自給自足**，只透過 `from core.xxx`、`from services.xxx` 引用通用層，不跨工具互相引用
 - **`EXPECTED_MAINS`**（P1~P9 欄位清單）定義在工具層 `utils/json_utils.py`，不在 `core/config.py`
 - **SSE 串流**統一使用 `deps.py` 的 `sse_streaming_response(runner_fn, request)` 包裝
@@ -169,5 +182,8 @@ api/routers/tools/<new_tool>/
 | `data/session_state.json` | 前端 session 狀態持久化 |
 | `data/image_thread_history_*.json` | 子討論串記憶 |
 | `data/token_usage.json` | Token 用量紀錄 |
+| `data/style_learning_queue_ecommerce_image.json` | 風格學習事件佇列（pending/extracted） |
+| `data/style_profile_ecommerce_image.json` | 工具級風格偏好 profile（含 default） |
+| `data/style_profile_ecommerce_image_versions.json` | 風格學習操作歷史（extract/rollback/rename/delete） |
 | `.env` | 環境變數（含 API 金鑰） |
 

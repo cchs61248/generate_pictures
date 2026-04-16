@@ -9,7 +9,10 @@ if hasattr(sys.stderr, "reconfigure"):
     sys.stderr.reconfigure(encoding="utf-8")
 
 from core.config import parse_config, sync_managed_env_from_dotenv
+from core.app_logging import get_backend_logger, setup_app_logging
 from api.routers.tools.ecommerce_image.pipeline import run_pipeline
+
+logger = get_backend_logger("cli")
 
 
 def parse_args() -> argparse.Namespace:
@@ -21,16 +24,17 @@ def parse_args() -> argparse.Namespace:
 async def async_main() -> None:
     args = parse_args()
     project_root = os.path.dirname(os.path.abspath(__file__))
+    setup_app_logging(project_root)
     sync_managed_env_from_dotenv(os.path.join(project_root, ".env"))
     config = parse_config(
         stage3_only_flag=args.stage3_only,
     )
 
-    print("歡迎使用 AI 電商圖文生成助手！")
+    logger.info("歡迎使用 AI 電商圖文生成助手！")
     result = await run_pipeline(config=config)
-    print("\n✅ 任務完成")
-    print(f"JSON 輸出：{result['final_output_path']}")
-    print(f"圖片輸出數量：{len(result['saved_files'])}")
+    logger.info("✅ 任務完成")
+    logger.info("JSON 輸出：%s", result["final_output_path"])
+    logger.info("圖片輸出數量：%s", len(result["saved_files"]))
 
 
 if __name__ == "__main__":

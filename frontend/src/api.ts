@@ -1,4 +1,6 @@
 /** 後端基底 URL，開發時預設 FastAPI uvicorn 埠 8000 */
+import { logFrontend } from "./frontendLogger"
+
 export function getApiBaseUrl(): string {
   const raw = import.meta.env.VITE_API_BASE_URL as string | undefined
   return (raw && raw.trim()) || "http://127.0.0.1:8000"
@@ -43,6 +45,11 @@ export async function uploadImage(
   baseUrl: string,
   sessionId?: string,
 ): Promise<void> {
+  logFrontend(baseUrl, "info", "uploadImage started", {
+    sessionId: sessionId ?? null,
+    filename: file.name,
+    size: file.size,
+  })
   const form = new FormData()
   form.append("file", file)
   if (sessionId) {
@@ -55,8 +62,13 @@ export async function uploadImage(
   if (!res.ok) {
     const body = await safeJson(res)
     const detail = extractDetail(body)
+    logFrontend(baseUrl, "error", "uploadImage failed", { status: res.status, detail })
     throw new Error(detail || `上傳失敗 (${res.status})`)
   }
+  logFrontend(baseUrl, "info", "uploadImage completed", {
+    sessionId: sessionId ?? null,
+    filename: file.name,
+  })
 }
 
 export async function deleteSessionUpload(
@@ -70,6 +82,7 @@ export async function deleteSessionUpload(
   if (!res.ok) {
     const body = await safeJson(res)
     const detail = extractDetail(body)
+    logFrontend(baseUrl, "error", "deleteSessionUpload failed", { status: res.status, detail, sessionId })
     throw new Error(detail || `刪除上傳圖失敗 (${res.status})`)
   }
 }
@@ -94,6 +107,11 @@ export async function uploadDocument(
   baseUrl: string,
   sessionId: string,
 ): Promise<{ ok: boolean; filename: string }> {
+  logFrontend(baseUrl, "info", "uploadDocument started", {
+    sessionId,
+    filename: file.name,
+    size: file.size,
+  })
   const form = new FormData()
   form.append("file", file)
   form.append("session_id", sessionId)
@@ -104,9 +122,15 @@ export async function uploadDocument(
   if (!res.ok) {
     const body = await safeJson(res)
     const detail = extractDetail(body)
+    logFrontend(baseUrl, "error", "uploadDocument failed", { status: res.status, detail, sessionId })
     throw new Error(detail || `文件上傳失敗 (${res.status})`)
   }
-  return res.json() as Promise<{ ok: boolean; filename: string }>
+  const data = (await res.json()) as { ok: boolean; filename: string }
+  logFrontend(baseUrl, "info", "uploadDocument completed", {
+    sessionId,
+    filename: data.filename,
+  })
+  return data
 }
 
 export async function deleteSessionDocument(
@@ -250,6 +274,7 @@ export async function fetchEnvSettings(
   if (!res.ok) {
     const body = await safeJson(res)
     const detail = extractDetail(body)
+    logFrontend(baseUrl, "error", "fetchEnvSettings failed", { status: res.status, detail })
     throw new Error(detail || `讀取設定失敗 (${res.status})`)
   }
   const data = (await res.json()) as Record<string, unknown>
@@ -278,6 +303,7 @@ export async function saveEnvSettings(
   if (!res.ok) {
     const body = await safeJson(res)
     const detail = extractDetail(body)
+    logFrontend(baseUrl, "error", "saveEnvSettings failed", { status: res.status, detail })
     throw new Error(detail || `儲存設定失敗 (${res.status})`)
   }
 }
@@ -297,6 +323,7 @@ export async function saveSessionState(
     if (res.status === 409) {
       throw new Error("SESSION_STATE_CONFLICT")
     }
+    logFrontend(baseUrl, "error", "saveSessionState failed", { status: res.status, detail })
     throw new Error(detail || `儲存 session 失敗 (${res.status})`)
   }
   const data = (await res.json()) as SessionStatePayload
@@ -343,6 +370,10 @@ export async function consumeImageThreadStream(
   onEvent: (event: ImageThreadStreamEvent) => void,
   signal?: AbortSignal,
 ): Promise<void> {
+  logFrontend(baseUrl, "info", "consumeImageThreadStream started", {
+    sessionId,
+    sessionTitle,
+  })
   const res = await fetch(`${trimSlash(baseUrl)}/chat/image-thread`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
@@ -360,6 +391,7 @@ export async function consumeImageThreadStream(
   if (!res.ok) {
     const body = await safeJson(res)
     const detail = extractDetail(body)
+    logFrontend(baseUrl, "error", "consumeImageThreadStream request failed", { status: res.status, detail, sessionId })
     throw new Error(detail || `圖片討論串請求失敗 (${res.status})`)
   }
   const reader = res.body?.getReader()
@@ -374,8 +406,11 @@ export async function consumeImageThreadStream(
     const jsonStr = trimmed.slice(5).trimStart()
     try {
       onEvent(JSON.parse(jsonStr) as ImageThreadStreamEvent)
-    } catch {
-      /* 略過無法解析的片段 */
+    } catch (err) {
+      logFrontend(baseUrl, "warning", "consumeImageThreadStream parse failed", {
+        sessionId,
+        error: String(err),
+      })
     }
   }
   while (true) {
@@ -396,6 +431,7 @@ export async function consumeImageThreadStream(
       if (t) dispatchSseBlock(t)
     }
   }
+  logFrontend(baseUrl, "info", "consumeImageThreadStream completed", { sessionId })
 }
 
 export async function runGeneration(
@@ -404,6 +440,10 @@ export async function runGeneration(
   sessionId?: string,
   selectedStyleProfileId?: string,
 ): Promise<RunResponse> {
+  logFrontend(baseUrl, "info", "runGeneration started", {
+    sessionId: sessionId ?? null,
+    inputLength: userInput.length,
+  })
   const res = await fetch(`${trimSlash(baseUrl)}/run`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
@@ -420,9 +460,15 @@ export async function runGeneration(
   if (!res.ok) {
     const body = await safeJson(res)
     const detail = extractDetail(body)
+    logFrontend(baseUrl, "error", "runGeneration failed", { status: res.status, detail, sessionId })
     throw new Error(detail || `執行失敗 (${res.status})`)
   }
-  return res.json() as Promise<RunResponse>
+  const data = (await res.json()) as RunResponse
+  logFrontend(baseUrl, "info", "runGeneration completed", {
+    sessionId: sessionId ?? null,
+    savedFilesCount: data.saved_files?.length ?? 0,
+  })
+  return data
 }
 
 /** 呼叫 POST /run-stream，逐筆解析 SSE data JSON */
@@ -434,6 +480,7 @@ export async function consumeRunStream(
   sessionId?: string,
   selectedStyleProfileId?: string,
 ): Promise<void> {
+  logFrontend(baseUrl, "info", "consumeRunStream started", { sessionId })
   const res = await fetch(`${trimSlash(baseUrl)}/run-stream`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
@@ -451,6 +498,7 @@ export async function consumeRunStream(
   if (!res.ok) {
     const body = await safeJson(res)
     const detail = extractDetail(body)
+    logFrontend(baseUrl, "error", "consumeRunStream request failed", { status: res.status, detail, sessionId })
     throw new Error(detail || `串流請求失敗 (${res.status})`)
   }
   const reader = res.body?.getReader()
@@ -465,8 +513,11 @@ export async function consumeRunStream(
     const jsonStr = trimmed.slice(5).trimStart()
     try {
       onEvent(JSON.parse(jsonStr) as StreamEvent)
-    } catch {
-      /* 略過無法解析的片段 */
+    } catch (err) {
+      logFrontend(baseUrl, "warning", "consumeRunStream parse failed", {
+        sessionId: sessionId ?? null,
+        error: String(err),
+      })
     }
   }
   while (true) {
@@ -479,6 +530,7 @@ export async function consumeRunStream(
     }
     if (done) break
   }
+  logFrontend(baseUrl, "info", "consumeRunStream completed", { sessionId })
   const tail = buffer.trim()
   if (tail) {
     for (const line of tail.split("\n")) {
@@ -512,6 +564,7 @@ export async function fetchTokenUsage(
   const res = await fetch(url)
   if (!res.ok) {
     const body = await safeJson(res)
+    logFrontend(baseUrl, "error", "fetchTokenUsage failed", { status: res.status, detail: extractDetail(body), start, end })
     throw new Error(extractDetail(body) || `取得 token 用量失敗：HTTP ${res.status}`)
   }
   const data = (await res.json()) as { records: TokenUsageRecord[] }
@@ -587,6 +640,7 @@ export async function fetchStyleLearningStatus(
   )
   if (!res.ok) {
     const body = await safeJson(res)
+    logFrontend(baseUrl, "error", "fetchStyleLearningStatus failed", { status: res.status, detail: extractDetail(body) })
     throw new Error(extractDetail(body) || `讀取風格學習狀態失敗 (${res.status})`)
   }
   return res.json() as Promise<StyleLearningStatus>

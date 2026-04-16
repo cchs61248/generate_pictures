@@ -6,8 +6,11 @@ from google.genai import types
 
 from api.deps import project_root
 from core.config import get_image_model, get_image_output_size
+from core.app_logging import get_backend_logger
 from api.routers.tools.ecommerce_image.prompts.image_style import prompt_template as picture_style_template
 from api.routers.tools.ecommerce_image.services.style_learning import get_style_prompt_by_id
+
+logger = get_backend_logger("services.image_gen")
 
 
 def resolve_picture_style_template(selected_style_profile_id: str | None = None) -> str:
@@ -15,9 +18,7 @@ def resolve_picture_style_template(selected_style_profile_id: str | None = None)
         root=project_root(),
         selected_profile_id=selected_style_profile_id,
     )
-    print('==============resolve_picture_style_template==============')
-    print(picture_style_template + (style_prompt or ""))
-    print('==============resolve_picture_style_template==============')
+    logger.info("resolve_picture_style_template: %s", picture_style_template + (style_prompt or ""))
     return picture_style_template + (style_prompt or "")
 
 
@@ -68,7 +69,12 @@ def generate_image_with_retry(
             err_str = str(exc)
             if is_transient_google_api_error(err_str) and attempt < max_retries:
                 wait_sec = retry_wait_seconds_for_google(err_str)
-                print(f"  ⏳ 遇到暫時性錯誤，等待 {wait_sec} 秒後重試（第 {attempt + 1}/{max_retries} 次）...")
+                logger.warning(
+                    "遇到暫時性錯誤，等待 %s 秒後重試（第 %s/%s 次）",
+                    wait_sec,
+                    attempt + 1,
+                    max_retries,
+                )
                 time.sleep(wait_sec)
             else:
                 raise
@@ -99,7 +105,12 @@ async def generate_image_webapi(
             err_str = str(exc)
             if is_transient_google_api_error(err_str) and attempt < max_retries:
                 wait_sec = retry_wait_seconds_for_google(err_str)
-                print(f"  ⏳ Web API 產圖遇到暫時性錯誤，等待 {wait_sec} 秒後重試（第 {attempt + 1}/{max_retries} 次）...")
+                logger.warning(
+                    "Web API 產圖暫時性錯誤，等待 %s 秒後重試（第 %s/%s 次）",
+                    wait_sec,
+                    attempt + 1,
+                    max_retries,
+                )
                 await asyncio.sleep(wait_sec)
             else:
                 raise

@@ -11,6 +11,7 @@ import os
 from google.genai import types
 
 from api.deps import project_root
+from core.app_logging import get_backend_logger
 from core.config import get_text_model
 from core.progress import GROUP_STAGE2_META, ProgressBus
 from core.token_logger import log_token_usage
@@ -26,6 +27,7 @@ from api.routers.tools.ecommerce_image.utils.json_utils import (
 
 # 獨立一行、上下空行 → CommonMark 解析為 <hr>，前端樣式化成細橫線分隔
 _TOPIC_SEP = "-------------"
+logger = get_backend_logger("stages.stage2_json")
 
 
 def _format_final_data_markdown(final_data: list[dict]) -> str:
@@ -83,7 +85,7 @@ async def generate_json_plan(
             }
         )
 
-    print("\n[階段二] 正在結合 json_schema 規範，生成最終的 AI 繪圖提示詞與文案...")
+    logger.info("[階段二] 正在結合 json_schema 規範，生成最終的 AI 繪圖提示詞與文案...")
     style_prompt = get_style_prompt_by_id(
         root=project_root(),
         selected_profile_id=selected_style_profile_id,
@@ -99,18 +101,15 @@ async def generate_json_plan(
 {gathered_info}
 """
 
-    print("\n" + "=" * 72)
-    print("[LLM prompt] stage2_json · user message text (plus one product image)")
-    print("=" * 72)
-    print(format_prompt.strip())
-    print("=" * 72)
+    logger.info(
+        "[LLM prompt] stage2_json · user message text (plus one product image)\n%s",
+        format_prompt.strip(),
+    )
     if not use_webapi:
-        print("[LLM prompt] stage2_json · system_instruction (API key path only)")
-        print("=" * 72)
-        print(stage2_system_instruction.strip())
-        print("=" * 72 + "\n")
-    else:
-        print()
+        logger.info(
+            "[LLM prompt] stage2_json · system_instruction (API key path only)\n%s",
+            stage2_system_instruction.strip(),
+        )
 
     if use_webapi:
         response = await gemini_client.generate_content(
@@ -152,7 +151,7 @@ async def generate_json_plan(
             final_data = parsed
         else:
             msg = f"⚠️ [格式檢查] 首次輸出未通過：{reason}"
-            print(f"\n{msg}")
+            logger.warning(msg)
             if progress:
                 await progress.emit(
                     {
@@ -163,7 +162,7 @@ async def generate_json_plan(
                 )
     except Exception as exc:
         msg = f"⚠️ [格式檢查] 首次輸出非合法 JSON：{exc}"
-        print(f"\n{msg}")
+        logger.warning(msg)
         if progress:
             await progress.emit(
                 {
@@ -175,7 +174,7 @@ async def generate_json_plan(
 
     if final_data is None:
         line = "[修復流程] 正在嘗試二次修復輸出格式..."
-        print(line)
+        logger.info(line)
         if progress:
             await progress.emit(
                 {
@@ -195,17 +194,14 @@ async def generate_json_plan(
             raise ValueError(f"修復後仍不符合 JSON 規範：{reason}")
         final_data = repaired
 
-    print("\n🤖 [最終輸出] JSON:")
-    print("=" * 60)
-    print(json.dumps(final_data, ensure_ascii=False, indent=2))
-    print("=" * 60)
+    logger.info("🤖 [最終輸出] JSON:\n%s", json.dumps(final_data, ensure_ascii=False, indent=2))
 
     out_dir = os.path.dirname(output_json_path)
     if out_dir:
         os.makedirs(out_dir, exist_ok=True)
     with open(output_json_path, "w", encoding="utf-8") as file:
         json.dump(final_data, file, ensure_ascii=False, indent=2)
-    print(f"💾 [JSON 已儲存] {output_json_path}")
+    logger.info("💾 [JSON 已儲存] %s", output_json_path)
     if progress:
         await progress.emit(
             {

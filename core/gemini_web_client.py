@@ -32,6 +32,7 @@ from urllib.parse import urlencode
 import requests
 from PIL import Image
 
+from core.app_logging import get_backend_logger
 
 # ─────────────────────────────────────────────────────────────────────────────
 # 常數
@@ -80,6 +81,8 @@ _STREAM_URL_TEMPLATE = (
     "StreamGenerate?bl=boq_assistant-bard-web-server_20260405.11_p3"
     "&f.sid={f_sid}&hl=zh-TW&_reqid={reqid}&rt=c"
 )
+
+logger = get_backend_logger("gemini_web_client")
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -231,17 +234,17 @@ class GeminiWebClient:
         self._session.cookies.update(self._cookies)
 
         if not self._at_token or not self._f_sid:
-            print("[GeminiWebClient] 自動取得 at token 與 f.sid...")
+            logger.info("[GeminiWebClient] 自動取得 at token 與 f.sid...")
             try:
                 at, f_sid, bl = await asyncio.to_thread(_fetch_at_token, self._session)
                 if at:
                     self._at_token = at
-                    print(f"[GeminiWebClient] at token 已取得：{at[:20]}...")
+                    logger.info("[GeminiWebClient] at token 已取得：%s...", at[:20])
                 else:
                     raise ValueError("首頁 HTML 中找不到 at token（SNlM0e / cfb2h）")
                 if f_sid:
                     self._f_sid = f_sid
-                    print(f"[GeminiWebClient] f.sid 已取得：{f_sid}")
+                    logger.info("[GeminiWebClient] f.sid 已取得：%s", f_sid)
                 if bl:
                     self._bl = bl
             except Exception as exc:
@@ -311,10 +314,14 @@ class GeminiWebClient:
         base_headers = _build_dynamic_headers(self._cookies, self._session_uuid)
         stream_headers = {**base_headers, "content-type": "application/x-www-form-urlencoded;charset=UTF-8"}
 
-        print("[GeminiWebClient] 等待 Gemini 回應中（最多 300 秒）...")
+        logger.info("[GeminiWebClient] 等待 Gemini 回應中（最多 300 秒）...")
         resp = session.post(stream_url, headers=stream_headers, data=form_data, timeout=300)
         if not resp.ok:
-            print(f"[GeminiWebClient] StreamGenerate 失敗 {resp.status_code}：{resp.text[:500]}")
+            logger.error(
+                "[GeminiWebClient] StreamGenerate 失敗 %s：%s",
+                resp.status_code,
+                resp.text[:500],
+            )
         resp.raise_for_status()
 
         return self._parse_response(resp.text, session)
@@ -329,7 +336,12 @@ class GeminiWebClient:
         mime_map = {".jpg": "image/jpeg", ".jpeg": "image/jpeg", ".png": "image/png", ".webp": "image/webp"}
         mime_type = mime_map.get(ext, "image/jpeg")
 
-        print(f"[GeminiWebClient] 上傳圖片：{filename}，{file_size} bytes，{mime_type}")
+        logger.info(
+            "[GeminiWebClient] 上傳圖片：%s，%s bytes，%s",
+            filename,
+            file_size,
+            mime_type,
+        )
 
         init_headers = {
             **{k: v for k, v in _BASE_HEADERS_STATIC.items()},
@@ -390,7 +402,7 @@ class GeminiWebClient:
         if not token_path.startswith("/contrib_service"):
             raise RuntimeError(f"[GeminiWebClient] 上傳回傳格式非預期：{token_path[:300]}")
 
-        print(f"[GeminiWebClient] 上傳成功，token: {token_path[:80]}")
+        logger.info("[GeminiWebClient] 上傳成功，token: %s", token_path[:80])
         return token_path
 
     # ── 內部：組裝 f.req ────────────────────────────────────────────────────
@@ -518,7 +530,7 @@ class GeminiWebClient:
                 chunks.append(chunk)
             return b"".join(chunks)
         except Exception as exc:
-            print(f"[GeminiWebClient] 圖片下載失敗：{url[:80]} → {exc}")
+            logger.warning("[GeminiWebClient] 圖片下載失敗：%s → %s", url[:80], exc)
             return None
 
     # ── 內部：載入 cookies ──────────────────────────────────────────────────

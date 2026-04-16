@@ -11,10 +11,13 @@ from google.genai import types
 
 from api.deps import project_root
 from api.routers.tools.ecommerce_image.services.style_learning import get_style_prompt_by_id
+from core.app_logging import get_backend_logger
 from core.config import get_text_model
 from core.progress import GROUP_STAGE1_TOOLS, ProgressBus, progress_cv
 from core.token_logger import log_token_usage
 from services.web_search import fetch_webpage, get_max_llm_search_calls, make_bounded_search_web
+
+logger = get_backend_logger("stages.stage1_gather")
 
 
 def _extract_urls(user_input: str) -> list[str]:
@@ -80,7 +83,7 @@ async def gather_product_info(
         )
         ctx_token = progress_cv.set(progress)
 
-    print("\n[階段一] 正在分析圖片與聯網收集商品資訊，請稍候...")
+    logger.info("[階段一] 正在分析圖片與聯網收集商品資訊，請稍候...")
     dedup_urls = _extract_urls(user_input)
 
     if dedup_urls:
@@ -177,11 +180,10 @@ async def gather_product_info(
 請盡可能查詢最新且準確的台灣在地資訊，若搜尋不到特定資料請標注「待確認」。
 """
 
-    print("\n" + "=" * 72)
-    print("[LLM prompt] stage1_gather · user text (plus one product image in request)")
-    print("=" * 72)
-    print(info_prompt.strip())
-    print("=" * 72 + "\n")
+    logger.info(
+        "[LLM prompt] stage1_gather · user text (plus one product image in request)\n%s",
+        info_prompt.strip(),
+    )
 
     try:
         if use_webapi:
@@ -223,10 +225,7 @@ async def gather_product_info(
                     pass
             gathered_info = _response_text_safe(response)
 
-        print("\n✅ [階段一完成] 收集到的商品資訊如下：")
-        print("-" * 40)
-        print(gathered_info)
-        print("-" * 40)
+        logger.info("✅ [階段一完成] 收集到的商品資訊如下：\n%s", gathered_info)
         if progress:
             md = (
                 "✅ **[階段一完成]** 收集到的商品資訊如下：\n\n---\n\n"

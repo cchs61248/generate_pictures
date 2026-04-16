@@ -10,12 +10,15 @@ import os
 
 from PIL import Image
 
+from core.app_logging import get_backend_logger
 from core.config import get_image_model
 from core.progress import ProgressBus
 from core.token_logger import log_token_usage
 from services.image_gen import generate_image_with_retry, generate_image_webapi
 
 from api.routers.tools.ecommerce_image.services.image_process import build_safe_name, compose_image_prompt
+
+logger = get_backend_logger("stages.stage3_image")
 
 
 def _extract_pil_image(generated_image) -> Image.Image | None:
@@ -57,7 +60,7 @@ async def generate_all_images(
     progress: ProgressBus | None = None,
     selected_style_profile_id: str | None = None,
 ) -> list[str]:
-    print("\n[階段三] 正在為每張圖生成 AI 圖片，請稍候...")
+    logger.info("[階段三] 正在為每張圖生成 AI 圖片，請稍候...")
     os.makedirs(picture_dir, exist_ok=True)
 
     saved_files: list[str] = []
@@ -72,18 +75,16 @@ async def generate_all_images(
         safe_name = build_safe_name(main_name)
         group_id = f"stage3_p{sort_num:02d}"
 
-        print("\n" + "=" * 72)
-        print(
-            f"[LLM prompt] stage3_image · P{sort_num:02d} {main_name} "
-            "(plus reference product image)"
+        logger.info(
+            "[LLM prompt] stage3_image · P%02d %s (plus reference product image)\n%s",
+            sort_num,
+            main_name,
+            image_prompt.strip(),
         )
-        print("=" * 72)
-        print(image_prompt.strip())
-        print("=" * 72)
 
         # 讓前端每張圖一個獨立泡泡（可摺疊工作紀錄）
         title = f"🎨 [P{sort_num:02d}] 正在生成：{main_name}..."
-        print(f"\n{title}")
+        logger.info(title)
         if progress:
             await progress.emit(
                 {
@@ -104,7 +105,7 @@ async def generate_all_images(
                 )
                 if not generated_images:
                     w = f"  ⚠️  P{sort_num:02d} Web API 產圖未取得圖片（Gemini 未生成圖片），跳過。"
-                    print(w)
+                    logger.warning(w)
                     if progress:
                         await progress.emit(
                             {
@@ -149,7 +150,7 @@ async def generate_all_images(
 
             if raw_image is None:
                 w = f"  ⚠️  P{sort_num:02d} 未取得圖片內容，跳過。"
-                print(w)
+                logger.warning(w)
                 if progress:
                     await progress.emit(
                         {
@@ -166,7 +167,7 @@ async def generate_all_images(
             file_path = os.path.join(picture_dir, filename)
             resized.save(file_path, "PNG")
             ok_line = f"  ✅ 已儲存（1000×1000）：{file_path}"
-            print(ok_line)
+            logger.info(ok_line)
             if progress:
                 await progress.emit(
                     {
@@ -187,7 +188,7 @@ async def generate_all_images(
             saved_files.append(file_path)
         except Exception as exc:
             err = f"  ❌ P{sort_num:02d} 圖片生成失敗：{exc}"
-            print(err)
+            logger.error(err)
             if progress:
                 await progress.emit(
                     {
@@ -198,10 +199,10 @@ async def generate_all_images(
                 )
     if saved_files:
         done_msg = "✅ [階段三完成] 所有圖片已儲存至 picture/ 資料夾。"
-        print(f"\n{done_msg}")
+        logger.info(done_msg)
     else:
         done_msg = "⚠️ [階段三完成] 本次未成功儲存任何圖片。"
-        print(f"\n{done_msg}")
+        logger.warning(done_msg)
     # 階段三收尾訊息仍用文字泡泡，避免依附在某張圖的折疊泡泡內
     if progress:
         await progress.emit({"type": "text_block", "format": "plain", "content": done_msg})

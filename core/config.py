@@ -1,6 +1,10 @@
 import os
 from dataclasses import dataclass
 
+from core.app_logging import get_backend_logger
+
+logger = get_backend_logger("config")
+
 
 @dataclass(frozen=True)
 class ManagedEnvVar:
@@ -226,7 +230,7 @@ def parse_config(stage3_only_flag: bool) -> AppConfig:
     backend_raw = os.environ.get("GEMINI_BACKEND", "apikey")
     backend = (backend_raw or "apikey").lower().strip()
     if backend not in {"apikey", "webapi", "hybrid"}:
-        print(
+        logger.warning(
             f'⚠️ GEMINI_BACKEND 應為 apikey、webapi 或 hybrid，目前為「{backend_raw}」，將依 apikey 處理。'
         )
         backend = "apikey"

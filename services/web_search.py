@@ -5,9 +5,11 @@ import requests
 from bs4 import BeautifulSoup
 from ddgs import DDGS
 
+from core.app_logging import get_backend_logger
 from core.progress import GROUP_STAGE1_TOOLS, get_progress_bus
 
 TAVILY_SEARCH_URL = "https://api.tavily.com/search"
+logger = get_backend_logger("services.web_search")
 
 
 def get_max_llm_search_calls() -> int:
@@ -56,7 +58,7 @@ def _search_tavily(query: str, api_key: str) -> str:
 
 def search_web(query: str) -> str:
     line = f"👉 [系統提示] 觸發搜尋工具，關鍵字: {query}"
-    print(f"\n{line}")
+    logger.info(line)
     bus = get_progress_bus()
     if bus:
         bus.emit_sync(
@@ -77,7 +79,7 @@ def search_web(query: str) -> str:
 
 def fetch_webpage(url: str) -> str:
     line = f"👉 [系統提示] 觸發網頁讀取工具，正在訪問網址: {url}"
-    print(f"\n{line}")
+    logger.info(line)
     bus = get_progress_bus()
     if bus:
         bus.emit_sync(
