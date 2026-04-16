@@ -22,7 +22,7 @@ async def build_clients(
 
     if require_text_client and not config.use_webapi:
         if not config.api_key:
-            raise ValueError("請在環境變數或 .env 設定 GOOGLE_API_KEY 或 GEMINI_API_KEY。")
+            raise ValueError("請在環境變數或 .env 設定 GOOGLE_API_KEY。")
         bundle.genai_client = genai.Client(api_key=config.api_key)
 
     if require_image_client and (config.use_webapi or config.use_hybrid):
@@ -33,7 +33,7 @@ async def build_clients(
     if require_image_client and not (config.use_webapi or config.use_hybrid):
         if bundle.genai_client is None:
             if not config.api_key:
-                raise ValueError("請在環境變數或 .env 設定 GOOGLE_API_KEY 或 GEMINI_API_KEY。")
+                raise ValueError("請在環境變數或 .env 設定 GOOGLE_API_KEY。")
             bundle.genai_client = genai.Client(api_key=config.api_key)
 
     return bundle

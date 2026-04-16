@@ -23,7 +23,6 @@
 | 變數 | 說明 |
 |------|------|
 | `GOOGLE_API_KEY` | Gemini API 金鑰（apikey / hybrid 模式） |
-| `GEMINI_API_KEY` | 與 GOOGLE_API_KEY 擇一即可 |
 | `GEMINI_BACKEND` | `apikey`（預設）/ `hybrid` / `webapi` |
 | `TAVILY_API_KEY` | 網路搜尋金鑰（階段一用，選填） |
 | `TEXT_MODEL` | 文字模型（留空用預設） |
@@ -289,6 +288,6 @@ gnerate_pictures/
 ## 注意事項
 
 - 請先啟動後端，再啟動前端
-- `GOOGLE_API_KEY` 或 `GEMINI_API_KEY` 至少填一個才能執行
+- `GOOGLE_API_KEY` 必填，未設定將無法執行
 - 使用 `webapi` 或 `hybrid` 模式需要有效的瀏覽器 Cookie
 - uvicorn `--reload` 模式下若刪除目錄後需重啟伺服器

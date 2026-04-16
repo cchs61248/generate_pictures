@@ -73,10 +73,6 @@ MANAGED_ENV_VARS: tuple[ManagedEnvVar, ...] = (
         "Gemini 的 API 金鑰。使用 apikey 或 hybrid 模式時，文字與（非 Web）圖像生成需要此鍵。",
     ),
     ManagedEnvVar(
-        "GEMINI_API_KEY",
-        "與 GOOGLE_API_KEY 擇一即可；若兩者皆填，程式會優先使用 GOOGLE_API_KEY。",
-    ),
-    ManagedEnvVar(
         "GEMINI_BACKEND",
         "後端模式：apikey（預設，純 API）、hybrid（階段一二用 API、階段三產圖走 Web API）。",
     ),
@@ -119,7 +115,6 @@ MANAGED_ENV_KEYS: frozenset[str] = frozenset(v.key for v in MANAGED_ENV_VARS)
 # 仍由後端寫入 .env 並套用，但不在 GET /settings/env 與前端設定表單顯示。
 ENV_VARS_HIDDEN_FROM_SETTINGS_UI: frozenset[str] = frozenset(
     {
-        "GEMINI_API_KEY",
         "STAGE3_ONLY_MODE",
         "GEMINI_COOKIE_1PSID",
         "GEMINI_COOKIE_1PSIDTS",
@@ -256,7 +251,7 @@ def parse_config(stage3_only_flag: bool) -> AppConfig:
         use_webapi=(backend == "webapi"),
         use_hybrid=(backend == "hybrid"),
         stage3_only_mode=stage3_only_mode,
-        api_key=os.environ.get("GOOGLE_API_KEY") or os.environ.get("GEMINI_API_KEY") or "",
+        api_key=os.environ.get("GOOGLE_API_KEY") or "",
         psid=os.environ.get("GEMINI_COOKIE_1PSID", ""),
         psidts=os.environ.get("GEMINI_COOKIE_1PSIDTS", ""),
         sample_image_path=sample_image_path,

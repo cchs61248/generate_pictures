@@ -91,9 +91,9 @@ async def chat_image_thread(payload: dict, request: Request):
             import google.genai as genai_new
 
             sync_managed_env_from_dotenv(os.path.join(root, ".env"))
-            api_key = os.environ.get("GOOGLE_API_KEY") or os.environ.get("GEMINI_API_KEY") or ""
+            api_key = os.environ.get("GOOGLE_API_KEY") or ""
             if not api_key:
-                raise ValueError("未設定 GOOGLE_API_KEY 或 GEMINI_API_KEY，請至設定頁填寫。")
+                raise ValueError("未設定 GOOGLE_API_KEY，請至設定頁填寫。")
 
             client = genai_new.Client(api_key=api_key)
             model_name = get_image_model()

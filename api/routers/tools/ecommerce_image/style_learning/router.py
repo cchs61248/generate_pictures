@@ -77,9 +77,9 @@ async def style_learning_history(
 async def style_learning_extract():
     root = project_root()
     sync_managed_env_from_dotenv(os.path.join(root, ".env"))
-    api_key = os.environ.get("GOOGLE_API_KEY") or os.environ.get("GEMINI_API_KEY") or ""
+    api_key = os.environ.get("GOOGLE_API_KEY") or ""
     if not api_key:
-        raise HTTPException(status_code=400, detail="未設定 GOOGLE_API_KEY 或 GEMINI_API_KEY")
+        raise HTTPException(status_code=400, detail="未設定 GOOGLE_API_KEY")
     try:
         client = genai.Client(api_key=api_key)
         return extract_style_profile(
