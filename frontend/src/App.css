@@ -1791,6 +1791,9 @@
 
 .token-table-wrap {
   overflow-x: auto;
+  overflow-y: auto;
+  /* 依 10 筆資料列（含表頭）固定高度，避免最後一頁縮小或預留過多空白。 */
+  height: 24rem;
 }
 
 .token-table {

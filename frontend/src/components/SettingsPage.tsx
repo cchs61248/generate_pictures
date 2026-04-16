@@ -144,7 +144,7 @@ export function SettingsPage({
   }, [baseUrl])
 
   const loadStyleQueue = useCallback(
-    async (page: number, scope = queueScope) => {
+    async (page: number, scope: "pending" | "extracted") => {
       const data = await fetchStyleLearningQueue(baseUrl, page, 10, scope)
       setStyleQueue(data.items)
       setQueuePage(data.page)
@@ -152,7 +152,7 @@ export function SettingsPage({
       setQueueTotal(data.total)
       setSelectedQueueIds(new Set())
     },
-    [baseUrl, queueScope],
+    [baseUrl],
   )
 
   const loadStyleHistory = useCallback(
@@ -166,21 +166,26 @@ export function SettingsPage({
   )
 
   const refreshStyleAll = useCallback(
-    async (queuePageInput = queuePage, historyPageInput = historyPage) => {
+    async (queuePageInput: number, historyPageInput: number) => {
       await Promise.all([
         loadStyleStatus(),
         loadStyleQueue(queuePageInput, queueScope),
         loadStyleHistory(historyPageInput),
       ])
     },
-    [historyPage, loadStyleHistory, loadStyleQueue, loadStyleStatus, queuePage, queueScope],
+    [loadStyleHistory, loadStyleQueue, loadStyleStatus, queueScope],
   )
 
+  /* 切換到風格學習分頁或變更 API 位址時自第 1 頁載入。勿將隨分頁狀態更新的函式放入依賴（先前把 refreshStyleAll 列入依賴時，queuePage/historyPage 一變就會觸發本 effect，導致按「下一頁」後被洗回第 1 頁）。 */
   useEffect(() => {
     if (activeTab !== "style") return
     setStyleMsg(null)
-    void refreshStyleAll(1, 1)
-  }, [activeTab, refreshStyleAll])
+    void Promise.all([
+      loadStyleStatus(),
+      loadStyleQueue(1, queueScope),
+      loadStyleHistory(1),
+    ])
+  }, [activeTab, baseUrl, loadStyleHistory, loadStyleQueue, loadStyleStatus, queueScope])
 
   useLayoutEffect(() => {
     if (loading) return
@@ -712,7 +717,7 @@ export function SettingsPage({
                     type="button"
                     className="token-page-btn"
                     disabled={queuePage <= 1}
-                    onClick={() => void loadStyleQueue(queuePage - 1)}
+                    onClick={() => void loadStyleQueue(queuePage - 1, queueScope)}
                   >
                     上一頁
                   </button>
@@ -720,7 +725,7 @@ export function SettingsPage({
                     type="button"
                     className="token-page-btn"
                     disabled={queuePage >= queueTotalPages}
-                    onClick={() => void loadStyleQueue(queuePage + 1)}
+                    onClick={() => void loadStyleQueue(queuePage + 1, queueScope)}
                   >
                     下一頁
                   </button>
