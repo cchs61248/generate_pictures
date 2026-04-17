@@ -161,6 +161,7 @@ class RunJob:
         self.selected_style_profile_id = selected_style_profile_id
         self.status = "running"
         self.events: list[dict[str, Any]] = []
+        self._next_seq = 1
         self._subscribers: set[asyncio.Queue] = set()
         self._job_lock = asyncio.Lock()
         self.task: asyncio.Task | None = None
@@ -189,27 +190,43 @@ class RunJob:
             "started_user_input": self.user_input,
             "stage3_only": self.stage3_only,
             "selected_style_profile_id": self.selected_style_profile_id,
+            "last_seq": self._next_seq - 1,
             "events": list(ev),
         }
 
     async def on_event(self, payload: dict[str, Any]) -> None:
+        ev = dict(payload)
+        seq = ev.get("seq")
+        if not isinstance(seq, int) or seq <= 0:
+            seq = self._next_seq
+            ev["seq"] = seq
+        self._next_seq = max(self._next_seq, seq + 1)
         async with self._job_lock:
             if len(self.events) >= MAX_RUN_JOB_EVENTS:
                 self.events = self.events[-(MAX_RUN_JOB_EVENTS - 1) :]
-            self.events.append(payload)
+            self.events.append(ev)
             snap = self._snapshot()
             queues = list(self._subscribers)
         await asyncio.to_thread(_persist_snapshot, self.root, self.sid, snap)
         for q in queues:
             try:
-                q.put_nowait(payload)
+                q.put_nowait(ev)
             except asyncio.QueueFull:
                 pass
 
-    async def register_subscriber(self) -> tuple[list[dict[str, Any]], asyncio.Queue]:
+    async def register_subscriber(
+        self, from_seq: int = 0
+    ) -> tuple[list[dict[str, Any]], asyncio.Queue]:
         q: asyncio.Queue = asyncio.Queue(maxsize=500)
         async with self._job_lock:
-            replay = list(self.events)
+            if from_seq > 0:
+                replay = [
+                    ev
+                    for ev in self.events
+                    if not isinstance(ev.get("seq"), int) or ev.get("seq", 0) > from_seq
+                ]
+            else:
+                replay = list(self.events)
             self._subscribers.add(q)
         return replay, q
 
@@ -275,12 +292,12 @@ async def cancel_ecommerce_run(root: str, sid: str) -> bool:
     return True
 
 
-async def subscribe_session_events(root: str, sid: str):
+async def subscribe_session_events(root: str, sid: str, from_seq: int = 0):
     """重播 + 即時事件；斷線時由呼叫端停止迭代，不取消背景 Task。"""
     async with _registry_lock:
         job = _jobs.get(sid)
     if job:
-        replay, q = await job.register_subscriber()
+        replay, q = await job.register_subscriber(from_seq=from_seq)
         try:
             for ev in replay:
                 yield ev
@@ -308,6 +325,10 @@ async def subscribe_session_events(root: str, sid: str):
         return
     for ev in events:
         if isinstance(ev, dict):
+            if from_seq > 0:
+                seq = ev.get("seq")
+                if isinstance(seq, int) and seq <= from_seq:
+                    continue
             yield ev
     last = events[-1] if events else None
     if not isinstance(last, dict) or last.get("type") not in ("complete", "error"):

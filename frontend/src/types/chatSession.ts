@@ -30,6 +30,8 @@ export type ChatSession = {
   docFileNames?: { serverFilename: string; originalName: string }[]
   /** 使用中的工具級風格偏好（none 代表不使用） */
   selectedStyleProfileId?: string
+  /** 最後接收到的 run-stream SSE 事件序號（用於斷線/刷新續傳） */
+  lastRunEventSeq?: number
 }
 
 export const DEFAULT_SESSION_TITLE = "AI 電商圖文助手"

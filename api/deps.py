@@ -156,6 +156,12 @@ async def sse_streaming_response(generator_func, request) -> StreamingResponse:
     queue 中的每個 item 須為 dict，完成時 type 為 "complete" 或 "error"。
     """
     async def event_stream():
+        def _encode_sse(item: dict[str, Any]) -> str:
+            seq = item.get("seq")
+            if isinstance(seq, int) and seq > 0:
+                return f"id: {seq}\ndata: {json.dumps(item, ensure_ascii=False)}\n\n"
+            return f"data: {json.dumps(item, ensure_ascii=False)}\n\n"
+
         queue: asyncio.Queue = asyncio.Queue()
         task = asyncio.create_task(generator_func(queue))
         try:
@@ -167,7 +173,7 @@ async def sse_streaming_response(generator_func, request) -> StreamingResponse:
                     item = await asyncio.wait_for(queue.get(), timeout=0.25)
                 except asyncio.TimeoutError:
                     continue
-                yield f"data: {json.dumps(item, ensure_ascii=False)}\n\n"
+                yield _encode_sse(item)
                 if item.get("type") in ("complete", "error"):
                     break
         finally:
@@ -197,11 +203,17 @@ async def sse_streaming_detached(
     """
 
     async def event_stream():
+        def _encode_sse(item: dict[str, Any]) -> str:
+            seq = item.get("seq")
+            if isinstance(seq, int) and seq > 0:
+                return f"id: {seq}\ndata: {json.dumps(item, ensure_ascii=False)}\n\n"
+            return f"data: {json.dumps(item, ensure_ascii=False)}\n\n"
+
         try:
             async for item in event_source:
                 if await request.is_disconnected():
                     break
-                yield f"data: {json.dumps(item, ensure_ascii=False)}\n\n"
+                yield _encode_sse(item)
                 if item.get("type") in ("complete", "error"):
                     break
         finally:

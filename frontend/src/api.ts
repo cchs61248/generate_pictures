@@ -40,6 +40,10 @@ export type StreamEvent =
   | { type: "complete"; saved_files: string[]; final_output_path: string }
   | { type: "error"; detail: string }
 
+export type SseEventMeta = {
+  eventId?: number
+}
+
 export async function uploadImage(
   file: File,
   baseUrl: string,
@@ -474,7 +478,7 @@ export async function runGeneration(
 export async function consumeRunStream(
   userInput: string,
   baseUrl: string,
-  onEvent: (event: StreamEvent) => void,
+  onEvent: (event: StreamEvent, meta?: SseEventMeta) => void,
   signal?: AbortSignal,
   sessionId?: string,
   selectedStyleProfileId?: string,
@@ -507,11 +511,18 @@ export async function consumeRunStream(
   const decoder = new TextDecoder()
   let buffer = ""
   const dispatchSseBlock = (block: string) => {
-    const trimmed = block.trim()
-    if (!trimmed.startsWith("data:")) return
-    const jsonStr = trimmed.slice(5).trimStart()
+    const lines = block
+      .split("\n")
+      .map((line) => line.trim())
+      .filter(Boolean)
+    const dataLine = lines.find((line) => line.startsWith("data:"))
+    if (!dataLine) return
+    const jsonStr = dataLine.slice(5).trimStart()
+    const idLine = lines.find((line) => line.startsWith("id:"))
+    const idRaw = idLine ? Number.parseInt(idLine.slice(3).trim(), 10) : NaN
+    const eventId = Number.isFinite(idRaw) && idRaw > 0 ? idRaw : undefined
     try {
-      onEvent(JSON.parse(jsonStr) as StreamEvent)
+      onEvent(JSON.parse(jsonStr) as StreamEvent, { eventId })
     } catch (err) {
       logFrontend(baseUrl, "warning", "consumeRunStream parse failed", {
         sessionId: sessionId ?? null,
@@ -601,12 +612,13 @@ export async function cancelEcommerceRun(
 export async function consumeRunStreamSubscribe(
   sessionId: string,
   baseUrl: string,
-  onEvent: (event: StreamEvent) => void,
+  onEvent: (event: StreamEvent, meta?: SseEventMeta) => void,
   signal?: AbortSignal,
+  fromSeq = 0,
 ): Promise<void> {
   logFrontend(baseUrl, "info", "consumeRunStreamSubscribe started", { sessionId })
   const res = await fetch(
-    `${trimSlash(baseUrl)}/run-stream/subscribe?session_id=${encodeURIComponent(sessionId)}`,
+    `${trimSlash(baseUrl)}/run-stream/subscribe?session_id=${encodeURIComponent(sessionId)}&from_seq=${encodeURIComponent(String(Math.max(0, Math.trunc(fromSeq))))}`,
     { signal },
   )
   if (!res.ok) {
@@ -626,11 +638,18 @@ export async function consumeRunStreamSubscribe(
   const decoder = new TextDecoder()
   let buffer = ""
   const dispatchSseBlock = (block: string) => {
-    const trimmed = block.trim()
-    if (!trimmed.startsWith("data:")) return
-    const jsonStr = trimmed.slice(5).trimStart()
+    const lines = block
+      .split("\n")
+      .map((line) => line.trim())
+      .filter(Boolean)
+    const dataLine = lines.find((line) => line.startsWith("data:"))
+    if (!dataLine) return
+    const jsonStr = dataLine.slice(5).trimStart()
+    const idLine = lines.find((line) => line.startsWith("id:"))
+    const idRaw = idLine ? Number.parseInt(idLine.slice(3).trim(), 10) : NaN
+    const eventId = Number.isFinite(idRaw) && idRaw > 0 ? idRaw : undefined
     try {
-      onEvent(JSON.parse(jsonStr) as StreamEvent)
+      onEvent(JSON.parse(jsonStr) as StreamEvent, { eventId })
     } catch (err) {
       logFrontend(baseUrl, "warning", "consumeRunStreamSubscribe parse failed", {
         sessionId,

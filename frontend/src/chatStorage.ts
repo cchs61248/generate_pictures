@@ -64,6 +64,10 @@ export function normalizePendingSession(raw: unknown): ChatSession | null {
       typeof p.selectedStyleProfileId === "string"
         ? p.selectedStyleProfileId
         : "none",
+    lastRunEventSeq:
+      typeof p.lastRunEventSeq === "number" && Number.isFinite(p.lastRunEventSeq)
+        ? Math.max(0, Math.trunc(p.lastRunEventSeq))
+        : 0,
   }
 }
 
@@ -158,6 +162,11 @@ export function loadPersistedState(): PersistedState | null {
         typeof (s as Partial<ChatSession>).selectedStyleProfileId === "string"
           ? (s as Partial<ChatSession>).selectedStyleProfileId
           : "none",
+      lastRunEventSeq:
+        typeof (s as Partial<ChatSession>).lastRunEventSeq === "number" &&
+        Number.isFinite((s as Partial<ChatSession>).lastRunEventSeq)
+          ? Math.max(0, Math.trunc((s as Partial<ChatSession>).lastRunEventSeq as number))
+          : 0,
     }))
     const p = normalizePendingSession(data.pendingToolSession)
     if (p) {

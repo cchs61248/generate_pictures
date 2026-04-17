@@ -24,6 +24,7 @@ import {
   initImageThread,
   saveSessionState,
   fetchStyleLearningStatus,
+  type SseEventMeta,
   type StreamEvent,
   type StyleProfile,
   uploadDocument,
@@ -79,6 +80,7 @@ function createSession(toolId?: string, initialStyleProfileId = "none"): ChatSes
     clearOnNextSend: false,
     toolId,
     selectedStyleProfileId: initialStyleProfileId || "none",
+    lastRunEventSeq: 0,
   }
 }
 
@@ -1294,10 +1296,14 @@ export default function App() {
   )
 
   const applyEcommerceRunStreamEvent = useCallback(
-    (sessionId: string, ev: StreamEvent) => {
+    (sessionId: string, ev: StreamEvent, meta?: SseEventMeta) => {
       patchSession(sessionId, (s) => ({
         ...s,
         streamPrimed: true,
+        lastRunEventSeq:
+          meta?.eventId && meta.eventId > 0
+            ? meta.eventId
+            : (s.lastRunEventSeq ?? 0),
         updatedAt: Date.now(),
       }))
       if (ev.type === "collapsible_init") {
@@ -1611,6 +1617,7 @@ export default function App() {
       ...s,
       isRunning: true,
       streamPrimed: false,
+      lastRunEventSeq: 0,
       updatedAt: Date.now(),
     }))
     const aborter = new AbortController()
@@ -1620,7 +1627,7 @@ export default function App() {
       await consumeRunStream(
         text,
         baseUrl,
-        (ev) => applyEcommerceRunStreamEvent(sessionId, ev),
+        (ev, meta) => applyEcommerceRunStreamEvent(sessionId, ev, meta),
         aborter.signal,
         sessionId,
         resolveStyleProfileId(activeSession),
@@ -1720,7 +1727,10 @@ export default function App() {
 
         patchSession(sid, (s) => ({
           ...s,
-          messages: trimMessagesAfterLastUser(s.messages),
+          messages:
+            (s.lastRunEventSeq ?? 0) > 0
+              ? s.messages
+              : trimMessagesAfterLastUser(s.messages),
           isRunning: true,
           streamPrimed: false,
           updatedAt: Date.now(),
@@ -1728,9 +1738,15 @@ export default function App() {
         if (myGen !== resumeRunGenRef.current) return
         runControllersRef.current.set(sid, aborter)
         subscribed = true
-        await consumeRunStreamSubscribe(sid, baseUrl, (ev) => {
-          applyEcommerceRunStreamEventRef.current(sid, ev)
-        }, aborter.signal)
+        await consumeRunStreamSubscribe(
+          sid,
+          baseUrl,
+          (ev, meta) => {
+            applyEcommerceRunStreamEventRef.current(sid, ev, meta)
+          },
+          aborter.signal,
+          sess.lastRunEventSeq ?? 0,
+        )
       } catch (e) {
         if (myGen !== resumeRunGenRef.current) return
         if (e instanceof DOMException && e.name === "AbortError") {

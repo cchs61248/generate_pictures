@@ -94,14 +94,20 @@ async def run_generation_stream(payload: dict, request: Request):
 
 
 @router.get("/run-stream/subscribe")
-async def run_stream_subscribe(session_id: str, request: Request):
+async def run_stream_subscribe(
+    session_id: str, request: Request, from_seq: int = 0
+):
     """僅訂閱該 session 既有 run 事件（重播 + 即時）；不要求上傳圖仍存在。"""
     root = project_root()
     sync_managed_env_from_dotenv(os.path.join(root, ".env"))
     sid = safe_session_id(session_id)
     if not sid:
         raise HTTPException(status_code=400, detail="invalid session_id")
-    return await sse_streaming_detached(subscribe_session_events(root, sid), request)
+    if from_seq < 0:
+        raise HTTPException(status_code=400, detail="invalid from_seq")
+    return await sse_streaming_detached(
+        subscribe_session_events(root, sid, from_seq=from_seq), request
+    )
 
 
 @router.get("/run/status")
