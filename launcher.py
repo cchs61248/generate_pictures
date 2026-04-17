@@ -29,6 +29,8 @@ API_PORT = 8000
 FRONTEND_HOST = "127.0.0.1"
 FRONTEND_PORT = 5173
 logger = get_backend_logger("launcher")
+SINGLE_INSTANCE_MUTEX_NAME = "Global\\gnerate_pictures_launcher_single_instance"
+ERROR_ALREADY_EXISTS = 183
 
 
 def get_screen_size() -> tuple[int, int]:
@@ -108,7 +110,31 @@ def open_browser_with_playwright(url: str) -> None:
                 browser.close()
 
 
+def acquire_single_instance_mutex() -> int:
+    mutex_handle = ctypes.windll.kernel32.CreateMutexW(
+        None, False, SINGLE_INSTANCE_MUTEX_NAME
+    )
+    if not mutex_handle:
+        raise RuntimeError("建立單一實例鎖失敗，請以系統管理員身分重試。")
+    if ctypes.windll.kernel32.GetLastError() == ERROR_ALREADY_EXISTS:
+        ctypes.windll.user32.MessageBoxW(
+            None,
+            "gnerate_pictures 已經在執行中，請勿重複開啟。",
+            "gnerate_pictures Launcher",
+            0x00000030,
+        )
+        raise SystemExit(0)
+    return mutex_handle
+
+
+def release_single_instance_mutex(mutex_handle: int) -> None:
+    if mutex_handle:
+        ctypes.windll.kernel32.ReleaseMutex(mutex_handle)
+        ctypes.windll.kernel32.CloseHandle(mutex_handle)
+
+
 def main() -> None:
+    mutex_handle = acquire_single_instance_mutex()
     os.environ["APP_RUNTIME_ROOT"] = str(RUNTIME_ROOT)
     os.chdir(RUNTIME_ROOT)
     setup_app_logging(str(RUNTIME_ROOT))
@@ -135,6 +161,7 @@ def main() -> None:
         frontend_server.server_close()
         backend_server.should_exit = True
         logger.info("[launcher] 已關閉")
+        release_single_instance_mutex(mutex_handle)
 
 
 if __name__ == "__main__":

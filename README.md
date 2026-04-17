@@ -167,6 +167,8 @@ cd .\dist\gnerate_pictures_launcher
 .\gnerate_pictures_launcher.exe
 ```
 
+> 已內建單一實例防呆：若程式已在執行，再次開啟 `gnerate_pictures_launcher.exe` 會跳出提示並直接結束第二個實例。
+
 ### 重新打包前提醒
 
 - 若前端程式有改動，請先重新執行 `cd frontend && npm run build`

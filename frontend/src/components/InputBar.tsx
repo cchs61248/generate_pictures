@@ -117,17 +117,6 @@ export function InputBar({
     (requireTextToSend && !value.trim()) ||
     (requireReferenceToSend && !referenceReady)
 
-  const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
-    if (e.key === "Enter" && !e.shiftKey) {
-      e.preventDefault()
-      if (requireReferenceToSend && !referenceReady) {
-        window.alert("請先使用左側圖片按鈕上傳一張商品圖片，成功後再送出。")
-        return
-      }
-      if (!disabled && !uploading && !sendBlocked) onSend()
-    }
-  }
-
   useEffect(() => {
     if (!usingFallbackSample) {
       onFallbackSampleStatusChange?.(false)
@@ -223,12 +212,11 @@ export function InputBar({
               showCompleted
                 ? "任務完成"
                 : lockImageThread
-                  ? "輸入修改指令…（Enter 送出，Shift+Enter 換行）"
-                  : "輸入商品描述、網址或問題…（Enter 送出，Shift+Enter 換行）"
+                  ? "輸入修改指令…（Enter 換行）"
+                  : "輸入商品描述、網址或問題…（Enter 換行）"
             }
             value={displayText}
             onChange={(e) => onChange(e.target.value)}
-            onKeyDown={handleKeyDown}
             disabled={disabled || uploading || showCompleted}
           />
 
