@@ -44,6 +44,33 @@ export type SseEventMeta = {
   eventId?: number
 }
 
+function splitSseSegments(buffer: string): { segments: string[]; rest: string } {
+  const parts = buffer.split(/\r?\n\r?\n/)
+  return { segments: parts.slice(0, -1), rest: parts.at(-1) ?? "" }
+}
+
+function parseSseEventBlock<T>(
+  block: string,
+): { event: T | null; meta?: SseEventMeta } {
+  const lines = block
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .filter(Boolean)
+  const dataLines = lines.filter((line) => line.startsWith("data:"))
+  if (!dataLines.length) return { event: null }
+  const jsonStr = dataLines
+    .map((line) => line.slice(5).trimStart())
+    .join("\n")
+  const idLine = lines.find((line) => line.startsWith("id:"))
+  const idRaw = idLine ? Number.parseInt(idLine.slice(3).trim(), 10) : NaN
+  const eventId = Number.isFinite(idRaw) && idRaw > 0 ? idRaw : undefined
+  try {
+    return { event: JSON.parse(jsonStr) as T, meta: { eventId } }
+  } catch {
+    return { event: null, meta: { eventId } }
+  }
+}
+
 export async function uploadImage(
   file: File,
   baseUrl: string,
@@ -403,43 +430,40 @@ export async function consumeImageThreadStream(
   }
   const decoder = new TextDecoder()
   let buffer = ""
+  let terminalReceived = false
   const dispatchSseBlock = (block: string) => {
-    const lines = block
-      .split("\n")
-      .map((line) => line.trim())
-      .filter(Boolean)
-    const dataLine = lines.find((line) => line.startsWith("data:"))
-    if (!dataLine) return
-    const jsonStr = dataLine.slice(5).trimStart()
-    const idLine = lines.find((line) => line.startsWith("id:"))
-    const idRaw = idLine ? Number.parseInt(idLine.slice(3).trim(), 10) : NaN
-    const eventId = Number.isFinite(idRaw) && idRaw > 0 ? idRaw : undefined
-    try {
-      onEvent(JSON.parse(jsonStr) as ImageThreadStreamEvent, { eventId })
-    } catch (err) {
+    const { event, meta } = parseSseEventBlock<ImageThreadStreamEvent>(block)
+    if (!event) {
       logFrontend(baseUrl, "warning", "consumeImageThreadStream parse failed", {
         sessionId,
-        error: String(err),
+        blockPreview: block.slice(0, 300),
       })
+      return
+    }
+    onEvent(event, meta)
+    if (event.type === "complete" || event.type === "error") {
+      terminalReceived = true
     }
   }
   while (true) {
     const { done, value } = await reader.read()
     if (value) buffer += decoder.decode(value, { stream: true })
-    const segments = buffer.split("\n\n")
-    buffer = segments.pop() ?? ""
+    const { segments, rest } = splitSseSegments(buffer)
+    buffer = rest
     for (const seg of segments) {
       dispatchSseBlock(seg)
+      if (terminalReceived) break
     }
+    if (terminalReceived) break
     if (done) break
   }
-  // 最後一段可能沒有尾端 \n\n，導致 complete／error 留在 buffer，await 永不結束
+  if (terminalReceived) {
+    await reader.cancel().catch(() => {})
+  }
+  // 最後一段可能沒有尾端分隔符，需補發解析。
   const tail = buffer.trim()
   if (tail) {
-    for (const line of tail.split("\n")) {
-      const t = line.trim()
-      if (t) dispatchSseBlock(t)
-    }
+    dispatchSseBlock(tail)
   }
   logFrontend(baseUrl, "info", "consumeImageThreadStream completed", { sessionId })
 }
@@ -516,43 +540,40 @@ export async function consumeImageThreadStreamSubscribe(
   }
   const decoder = new TextDecoder()
   let buffer = ""
+  let terminalReceived = false
   const dispatchSseBlock = (block: string) => {
-    const lines = block
-      .split("\n")
-      .map((line) => line.trim())
-      .filter(Boolean)
-    const dataLine = lines.find((line) => line.startsWith("data:"))
-    if (!dataLine) return
-    const jsonStr = dataLine.slice(5).trimStart()
-    const idLine = lines.find((line) => line.startsWith("id:"))
-    const idRaw = idLine ? Number.parseInt(idLine.slice(3).trim(), 10) : NaN
-    const eventId = Number.isFinite(idRaw) && idRaw > 0 ? idRaw : undefined
-    try {
-      onEvent(JSON.parse(jsonStr) as ImageThreadStreamEvent, { eventId })
-    } catch (err) {
+    const { event, meta } = parseSseEventBlock<ImageThreadStreamEvent>(block)
+    if (!event) {
       logFrontend(baseUrl, "warning", "consumeImageThreadStreamSubscribe parse failed", {
         sessionId,
-        error: String(err),
+        blockPreview: block.slice(0, 300),
       })
+      return
+    }
+    onEvent(event, meta)
+    if (event.type === "complete" || event.type === "error") {
+      terminalReceived = true
     }
   }
   while (true) {
     const { done, value } = await reader.read()
     if (value) buffer += decoder.decode(value, { stream: true })
-    const segments = buffer.split("\n\n")
-    buffer = segments.pop() ?? ""
+    const { segments, rest } = splitSseSegments(buffer)
+    buffer = rest
     for (const seg of segments) {
       dispatchSseBlock(seg)
+      if (terminalReceived) break
     }
+    if (terminalReceived) break
     if (done) break
+  }
+  if (terminalReceived) {
+    await reader.cancel().catch(() => {})
   }
   logFrontend(baseUrl, "info", "consumeImageThreadStreamSubscribe completed", { sessionId })
   const tail = buffer.trim()
   if (tail) {
-    for (const line of tail.split("\n")) {
-      const t = line.trim()
-      if (t) dispatchSseBlock(t)
-    }
+    dispatchSseBlock(tail)
   }
 }
 
