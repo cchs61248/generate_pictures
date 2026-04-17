@@ -46,7 +46,7 @@ export type SseEventMeta = {
 
 function splitSseSegments(buffer: string): { segments: string[]; rest: string } {
   const parts = buffer.split(/\r?\n\r?\n/)
-  return { segments: parts.slice(0, -1), rest: parts.at(-1) ?? "" }
+  return { segments: parts.slice(0, -1), rest: parts[parts.length - 1] ?? "" }
 }
 
 function parseSseEventBlock<T>(
