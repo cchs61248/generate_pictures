@@ -13,13 +13,25 @@ from api.routers.tools.ecommerce_image.services.style_learning import get_style_
 logger = get_backend_logger("services.image_gen")
 
 
+def _preview_text(text: str, limit: int = 300) -> str:
+    compact = " ".join((text or "").split())
+    if len(compact) <= limit:
+        return compact
+    return compact[:limit] + "...(truncated)"
+
+
 def resolve_picture_style_template(selected_style_profile_id: str | None = None) -> str:
     style_prompt = get_style_prompt_by_id(
         root=project_root(),
         selected_profile_id=selected_style_profile_id,
     )
-    logger.info("resolve_picture_style_template: %s", picture_style_template + (style_prompt or ""))
-    return picture_style_template + (style_prompt or "")
+    merged = picture_style_template + (style_prompt or "")
+    logger.debug(
+        "[image_gen] resolved style template | profile=%s preview=%s",
+        selected_style_profile_id or "(default)",
+        _preview_text(merged, 500),
+    )
+    return merged
 
 
 def is_transient_google_api_error(err_str: str) -> bool:
@@ -49,6 +61,7 @@ def generate_image_with_retry(
     selected_style_profile_id: str | None = None,
     max_retries: int = 5,
 ):
+    logger.info("[image_gen] generate with api-key path start")
     for attempt in range(max_retries + 1):
         try:
             return genai_client.models.generate_content(
@@ -93,6 +106,7 @@ async def generate_image_webapi(
 
 {image_prompt}
 """
+    logger.info("[image_gen] generate with webapi path start")
     for attempt in range(max_retries + 1):
         try:
             response = await gemini_client.generate_content(

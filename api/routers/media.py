@@ -20,6 +20,7 @@ from fastapi import APIRouter, File, Form, HTTPException, UploadFile
 from fastapi.responses import FileResponse
 from PIL import Image
 
+from core.app_logging import get_backend_logger
 from api.deps import (
     doc_upload_path,
     project_root,
@@ -42,13 +43,16 @@ from api.routers.tools.ecommerce_image.services.run_job import (
 )
 
 router = APIRouter(tags=["media"])
+logger = get_backend_logger("media.router")
 
 
 @router.post("/upload-image")
 async def upload_image(file: UploadFile = File(...), session_id: str | None = Form(None)):
     """接收單張圖片，存成 uploads/<sessionId>.jpg（無 sid 則回退 sample.jpg）。"""
+    logger.info("[media/upload-image] request | session_id=%s", session_id or "")
     content_type = (file.content_type or "").lower()
     if not content_type.startswith("image/"):
+        logger.warning("[media/upload-image] invalid content type: %s", content_type)
         raise HTTPException(
             status_code=400,
             detail="請上傳圖片檔案（JPG、PNG、WebP 等），不支援此檔案格式。",
@@ -60,6 +64,7 @@ async def upload_image(file: UploadFile = File(...), session_id: str | None = Fo
     try:
         raw = await file.read()
         if not raw:
+            logger.warning("[media/upload-image] empty file body")
             raise HTTPException(status_code=400, detail="請上傳圖片檔案，檔案內容不能為空。")
 
         image = Image.open(io.BytesIO(raw))
@@ -69,21 +74,25 @@ async def upload_image(file: UploadFile = File(...), session_id: str | None = Fo
         image.save(dest_path, "JPEG", quality=92)
     except HTTPException:
         raise
-    except Exception:
+    except Exception as exc:
+        logger.warning("[media/upload-image] invalid image payload: %s", exc)
         raise HTTPException(
             status_code=400,
             detail="無法識別圖片，請上傳有效的圖片檔案（JPG、PNG、WebP 等）。",
         )
 
+    logger.info("[media/upload-image] saved | path=%s bytes=%d", dest_path, len(raw))
     return {"ok": True, "path": dest_path}
 
 
 @router.get("/sample-reference")
 async def get_sample_reference(session_id: str | None = None):
+    logger.info("[media/sample-reference] request | session_id=%s", session_id or "")
     """取得目前 session 的參考圖（無 sid 則回退 sample.jpg）。"""
     root = project_root()
     path = sample_image_path_for_session(root, session_id)
     if not os.path.exists(path):
+        logger.warning("[media/sample-reference] not found | path=%s", path)
         raise HTTPException(status_code=404, detail="sample.jpg not found")
     return FileResponse(path, media_type="image/jpeg")
 
@@ -107,10 +116,12 @@ def _delete_session_docs(root: str, sid: str) -> int:
 
 @router.delete("/session-upload/{session_id}")
 async def delete_session_upload(session_id: str):
+    logger.info("[media/delete-session] request | session_id=%s", session_id)
     """刪除 uploads/<sessionId>.jpg、doc 附件、final_output_*.json 與 image thread 歷史（不存在視為成功）。"""
     root = project_root()
     sid = safe_session_id(session_id)
     if not sid:
+        logger.warning("[media/delete-session] invalid session_id")
         raise HTTPException(status_code=400, detail="invalid session_id")
 
     await cancel_ecommerce_run(root, sid)
@@ -132,7 +143,7 @@ async def delete_session_upload(session_id: str):
     deleted_history = delete_image_thread_history(root, sid)
     deleted_docs = _delete_session_docs(root, sid)
 
-    return {
+    result = {
         "ok": True,
         "deleted_upload": deleted_upload,
         "deleted_template_json": deleted_json,
@@ -141,14 +152,25 @@ async def delete_session_upload(session_id: str):
         "upload_path": upload_path,
         "template_json_path": json_path,
     }
+    logger.info(
+        "[media/delete-session] done | sid=%s deleted_upload=%s deleted_json=%s deleted_docs=%d deleted_history=%s",
+        sid,
+        deleted_upload,
+        deleted_json,
+        deleted_docs,
+        deleted_history,
+    )
+    return result
 
 
 @router.delete("/session-upload/{session_id}/image")
 async def delete_session_upload_image(session_id: str):
+    logger.info("[media/delete-image] request | session_id=%s", session_id)
     """僅刪除 uploads/<sessionId>.jpg（不存在視為成功）。"""
     root = project_root()
     sid = safe_session_id(session_id)
     if not sid:
+        logger.warning("[media/delete-image] invalid session_id")
         raise HTTPException(status_code=400, detail="invalid session_id")
 
     upload_path = os.path.join(root, "uploads", f"{sid}.jpg")
@@ -157,6 +179,7 @@ async def delete_session_upload_image(session_id: str):
         os.remove(upload_path)
         deleted_upload = True
 
+    logger.info("[media/delete-image] done | sid=%s deleted=%s", sid, deleted_upload)
     return {
         "ok": True,
         "deleted_upload": deleted_upload,
@@ -166,19 +189,23 @@ async def delete_session_upload_image(session_id: str):
 
 @router.post("/session-upload/from-picture")
 async def bind_session_upload_from_picture(payload: dict):
+    logger.info("[media/bind-from-picture] request received")
     """將 picture/<filename> 複製為 uploads/<sessionId>.jpg，供子討論串作為固定參考圖。"""
     session_id = payload.get("session_id")
     picture_filename = payload.get("picture_filename")
     sid = safe_session_id(session_id)
     if not sid:
+        logger.warning("[media/bind-from-picture] invalid session_id")
         raise HTTPException(status_code=400, detail="invalid session_id")
     if not isinstance(picture_filename, str) or not picture_filename.strip():
+        logger.warning("[media/bind-from-picture] invalid picture_filename")
         raise HTTPException(status_code=400, detail="invalid picture_filename")
 
     root = project_root()
     safe_name = os.path.basename(picture_filename.strip())
     src_path = os.path.join(root, "picture", safe_name)
     if not os.path.exists(src_path):
+        logger.warning("[media/bind-from-picture] source image missing | sid=%s file=%s", sid, safe_name)
         raise HTTPException(status_code=404, detail="picture image not found")
     dest_path = upload_image_path_for_session(root, sid)
     os.makedirs(os.path.dirname(dest_path), exist_ok=True)
@@ -190,21 +217,26 @@ async def bind_session_upload_from_picture(payload: dict):
             image = image.convert("RGB")
         image.save(dest_path, "JPEG", quality=92)
     except Exception as exc:
+        logger.warning("[media/bind-from-picture] invalid source image: %s", exc)
         raise HTTPException(status_code=400, detail=f"invalid picture image: {exc}") from exc
 
+    logger.info("[media/bind-from-picture] done | sid=%s path=%s", sid, dest_path)
     return {"ok": True, "path": dest_path}
 
 
 @router.post("/upload-document")
 async def upload_document(file: UploadFile = File(...), session_id: str | None = Form(None)):
+    logger.info("[media/upload-document] request | session_id=%s", session_id or "")
     """接收文件（txt/pdf/docx/md），存成 uploads/<sid>_doc_<uuid8>.<ext>，回傳 {ok, filename}。"""
     sid = safe_session_id(session_id)
     if not sid:
+        logger.warning("[media/upload-document] invalid session_id")
         raise HTTPException(status_code=400, detail="invalid session_id")
 
     original_name = file.filename or "document"
     ext = os.path.splitext(original_name)[1].lower()
     if ext not in _ALLOWED_DOC_EXTS:
+        logger.warning("[media/upload-document] unsupported extension: %s", ext)
         raise HTTPException(
             status_code=400,
             detail=f"不支援此文件格式，請上傳 txt、pdf、docx 或 md 檔案。",
@@ -217,24 +249,29 @@ async def upload_document(file: UploadFile = File(...), session_id: str | None =
 
     raw = await file.read()
     if not raw:
+        logger.warning("[media/upload-document] empty file body")
         raise HTTPException(status_code=400, detail="檔案內容不能為空。")
 
     with open(dest_path, "wb") as f_out:
         f_out.write(raw)
 
+    logger.info("[media/upload-document] saved | sid=%s file=%s bytes=%d", sid, server_filename, len(raw))
     return {"ok": True, "filename": server_filename}
 
 
 @router.delete("/session-upload/{session_id}/document/{filename}")
 async def delete_session_document(session_id: str, filename: str):
+    logger.info("[media/delete-document] request | session_id=%s filename=%s", session_id, filename)
     """刪除單一文件 uploads/<filename>（不存在視為成功）。"""
     root = project_root()
     sid = safe_session_id(session_id)
     if not sid:
+        logger.warning("[media/delete-document] invalid session_id")
         raise HTTPException(status_code=400, detail="invalid session_id")
 
     safe_name = os.path.basename(filename)
     if not safe_name.startswith(f"{sid}_doc_"):
+        logger.warning("[media/delete-document] filename not match sid | sid=%s filename=%s", sid, safe_name)
         raise HTTPException(status_code=400, detail="invalid filename")
 
     file_path = os.path.join(root, "uploads", safe_name)
@@ -243,26 +280,32 @@ async def delete_session_document(session_id: str, filename: str):
         os.remove(file_path)
         deleted = True
 
+    logger.info("[media/delete-document] done | sid=%s deleted=%s", sid, deleted)
     return {"ok": True, "deleted": deleted}
 
 
 @router.delete("/session-upload/{session_id}/documents")
 async def delete_session_documents(session_id: str):
+    logger.info("[media/delete-documents] request | session_id=%s", session_id)
     """刪除該 session 所有 doc 附件（不存在視為成功）。"""
     root = project_root()
     sid = safe_session_id(session_id)
     if not sid:
+        logger.warning("[media/delete-documents] invalid session_id")
         raise HTTPException(status_code=400, detail="invalid session_id")
 
     deleted_count = _delete_session_docs(root, sid)
+    logger.info("[media/delete-documents] done | sid=%s deleted=%d", sid, deleted_count)
     return {"ok": True, "deleted_count": deleted_count}
 
 
 @router.get("/images/{filename}")
 async def get_image(filename: str):
+    logger.info("[media/get-image] request | filename=%s", filename)
     """取得 picture/ 目錄中已生成的圖片。"""
     root = project_root()
     image_path = os.path.join(root, "picture", filename)
     if not os.path.exists(image_path):
+        logger.warning("[media/get-image] not found | path=%s", image_path)
         raise HTTPException(status_code=404, detail="image not found")
     return FileResponse(image_path)

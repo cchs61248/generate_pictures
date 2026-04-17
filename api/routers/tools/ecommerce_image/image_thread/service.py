@@ -16,6 +16,10 @@ Image Thread 歷史管理服務
 import json
 import os
 
+from core.app_logging import get_backend_logger
+
+logger = get_backend_logger("image_thread.service")
+
 
 def _history_path(root: str, session_id: str) -> str:
     data_dir = os.path.join(root, "data")
@@ -27,14 +31,16 @@ def load_image_thread_history(root: str, session_id: str) -> list[dict]:
     """讀取指定 session 的 image thread 歷史；不存在或損毀時回傳空列表。"""
     path = _history_path(root, session_id)
     if not os.path.exists(path):
+        logger.debug("[image_thread/service] history not found | sid=%s", session_id)
         return []
     try:
         with open(path, "r", encoding="utf-8") as f:
             data = json.load(f)
         if isinstance(data, list):
+            logger.debug("[image_thread/service] history loaded | sid=%s entries=%d", session_id, len(data))
             return data
-    except Exception:
-        pass
+    except Exception as exc:
+        logger.warning("[image_thread/service] history load failed | sid=%s err=%s", session_id, exc)
     return []
 
 
@@ -45,6 +51,7 @@ def save_image_thread_history(root: str, session_id: str, entries: list[dict]) -
     with open(temp_path, "w", encoding="utf-8") as f:
         json.dump(entries, f, ensure_ascii=False)
     os.replace(temp_path, path)
+    logger.debug("[image_thread/service] history saved | sid=%s entries=%d", session_id, len(entries))
 
 
 def delete_image_thread_history(root: str, session_id: str) -> bool:
@@ -52,7 +59,9 @@ def delete_image_thread_history(root: str, session_id: str) -> bool:
     path = _history_path(root, session_id)
     if os.path.exists(path):
         os.remove(path)
+        logger.info("[image_thread/service] history deleted | sid=%s", session_id)
         return True
+    logger.debug("[image_thread/service] history delete skipped (not found) | sid=%s", session_id)
     return False
 
 
@@ -69,9 +78,14 @@ def latest_image_path_from_entries(root: str, entries: list[dict]) -> str | None
         if entry.get("type") == "image":
             rel = entry.get("path", "")
             if rel:
-                return os.path.join(picture_dir, rel)
+                resolved = os.path.join(picture_dir, rel)
+                logger.debug("[image_thread/service] latest image from type=image | rel=%s", rel)
+                return resolved
         elif entry.get("type") == "model":
             rel = entry.get("image_path") or ""
             if rel:
-                return os.path.join(picture_dir, rel)
+                resolved = os.path.join(picture_dir, rel)
+                logger.debug("[image_thread/service] latest image from type=model | rel=%s", rel)
+                return resolved
+    logger.debug("[image_thread/service] latest image not found in entries")
     return None

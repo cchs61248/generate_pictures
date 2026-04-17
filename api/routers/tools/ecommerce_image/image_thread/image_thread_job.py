@@ -14,7 +14,9 @@ from typing import Any
 
 from fastapi import HTTPException
 
+from core.app_logging import get_backend_logger, log_context
 from api.deps import readable_error, safe_filename_part
+from api.deps import log_extra
 from api.routers.tools.ecommerce_image.image_thread.service import (
     latest_image_path_from_entries,
     load_image_thread_history,
@@ -28,6 +30,7 @@ from core.config import get_image_model, get_image_output_size, sync_managed_env
 from core.token_logger import log_token_usage
 
 MAX_IMAGE_THREAD_JOB_EVENTS = 500
+logger = get_backend_logger("image_thread.job")
 
 _image_thread_jobs: dict[str, "ImageThreadJob"] = {}
 _image_thread_registry_lock = asyncio.Lock()
@@ -73,7 +76,8 @@ def read_image_thread_job_disk(root: str, sid: str) -> dict[str, Any] | None:
             with open(path, "r", encoding="utf-8") as f:
                 data = json.load(f)
             return data if isinstance(data, dict) else None
-        except Exception:
+        except Exception as exc:
+            logger.warning("[image_thread_job] read disk failed | sid=%s err=%s", sid, exc)
             return None
 
 
@@ -99,6 +103,7 @@ def repair_stale_image_thread_running_on_disk(root: str, sid: str) -> None:
     data = read_image_thread_job_disk(root, sid)
     if not data or data.get("status") != "running":
         return
+    logger.warning("[image_thread_job] repair stale running snapshot | sid=%s", sid)
     ev = list(data.get("events") or [])
     ev.append(
         {
@@ -159,6 +164,7 @@ def _image_thread_generate_sync(
     sync_managed_env_from_dotenv(os.path.join(root, ".env"))
     api_key = os.environ.get("GOOGLE_API_KEY") or ""
     if not api_key:
+        logger.error("[image_thread_job] GOOGLE_API_KEY missing | sid=%s", sid)
         raise ValueError("未設定 GOOGLE_API_KEY，請至設定頁填寫。")
 
     client = genai_new.Client(api_key=api_key)
@@ -238,6 +244,12 @@ def _image_thread_generate_sync(
         resized.save(out_path, "JPEG", quality=92)
         saved_filename = filename
 
+    logger.debug(
+        "[image_thread_job] sync generate done | sid=%s text_chars=%d saved_image=%s",
+        sid,
+        len(result_text),
+        saved_filename or "",
+    )
     return result_text, saved_filename
 
 
@@ -249,12 +261,14 @@ class ImageThreadJob:
         user_text: str,
         session_title: str,
         selected_style_profile_id: str | None,
+        request_id: str | None,
     ) -> None:
         self.root = root
         self.sid = sid
         self.user_text = user_text
         self.session_title = session_title
         self.selected_style_profile_id = selected_style_profile_id
+        self.request_id = request_id
         self.status = "running"
         self.events: list[dict[str, Any]] = []
         self._next_seq = 1
@@ -305,6 +319,13 @@ class ImageThreadJob:
             snap = self._snapshot()
             queues = list(self._subscribers)
         await asyncio.to_thread(_persist_snapshot, self.root, self.sid, snap)
+        logger.debug(
+            "[image_thread_job] event appended | sid=%s type=%s seq=%s",
+            self.sid,
+            ev.get("type"),
+            ev.get("seq"),
+            extra=log_extra(self.sid, self.request_id),
+        )
         for q in queues:
             try:
                 q.put_nowait(ev)
@@ -332,77 +353,99 @@ class ImageThreadJob:
             self._subscribers.discard(q)
 
     async def _execute(self) -> None:
-        try:
-            entries = load_image_thread_history(self.root, self.sid)
-            latest_image_abs = latest_image_path_from_entries(self.root, entries)
-            if not latest_image_abs or not os.path.exists(latest_image_abs):
-                self.status = "error"
-                await self.on_event(
+        with log_context(self.sid, self.request_id):
+            logger.info(
+                "[image_thread_job] execute start | sid=%s title=%s style_profile=%s",
+                self.sid,
+                self.session_title,
+                self.selected_style_profile_id or "(default)",
+            )
+            try:
+                entries = load_image_thread_history(self.root, self.sid)
+                latest_image_abs = latest_image_path_from_entries(self.root, entries)
+                if not latest_image_abs or not os.path.exists(latest_image_abs):
+                    self.status = "error"
+                    logger.warning("[image_thread_job] latest image missing | sid=%s", self.sid)
+                    await self.on_event(
+                        {
+                            "type": "error",
+                            "detail": "找不到可用的參考圖片，請確認討論串已正確初始化。",
+                        }
+                    )
+                    return
+
+                await self.on_event({"type": "progress", "content": "正在處理圖片，請稍候…"})
+
+                result_text, saved_filename = await asyncio.to_thread(
+                    _image_thread_generate_sync,
+                    self.root,
+                    self.sid,
+                    self.user_text,
+                    self.session_title,
+                    self.selected_style_profile_id,
+                    latest_image_abs,
+                )
+
+                current_entries = load_image_thread_history(self.root, self.sid)
+                current_entries.append({"type": "user", "text": self.user_text})
+                current_entries.append(
                     {
-                        "type": "error",
-                        "detail": "找不到可用的參考圖片，請確認討論串已正確初始化。",
+                        "type": "model",
+                        "text": result_text or "",
+                        "image_path": saved_filename,
                     }
                 )
-                return
+                save_image_thread_history(self.root, self.sid, current_entries)
+                try:
+                    append_learning_event(
+                        root=self.root,
+                        session_id=self.sid,
+                        user_text=self.user_text,
+                        model_text=result_text or "",
+                        image_path=saved_filename,
+                    )
+                except Exception as exc:
+                    logger.warning(
+                        "[image_thread_job] append learning event failed | sid=%s err=%s",
+                        self.sid,
+                        exc,
+                    )
 
-            await self.on_event({"type": "progress", "content": "正在處理圖片，請稍候…"})
-
-            result_text, saved_filename = await asyncio.to_thread(
-                _image_thread_generate_sync,
-                self.root,
-                self.sid,
-                self.user_text,
-                self.session_title,
-                self.selected_style_profile_id,
-                latest_image_abs,
-            )
-
-            current_entries = load_image_thread_history(self.root, self.sid)
-            current_entries.append({"type": "user", "text": self.user_text})
-            current_entries.append(
-                {
-                    "type": "model",
-                    "text": result_text or "",
-                    "image_path": saved_filename,
-                }
-            )
-            save_image_thread_history(self.root, self.sid, current_entries)
-            try:
-                append_learning_event(
-                    root=self.root,
-                    session_id=self.sid,
-                    user_text=self.user_text,
-                    model_text=result_text or "",
-                    image_path=saved_filename,
+                self.status = "completed"
+                logger.info(
+                    "[image_thread_job] execute completed | sid=%s saved_image=%s",
+                    self.sid,
+                    saved_filename or "",
                 )
-            except Exception:
-                pass
-
-            self.status = "completed"
-            await self.on_event(
-                {
-                    "type": "complete",
-                    "text": result_text or "",
-                    "saved_image": saved_filename,
-                }
-            )
-        except asyncio.CancelledError:
-            self.status = "cancelled"
-            await self.on_event({"type": "error", "detail": "已取消目前流程。"})
-            raise
-        except Exception as exc:
-            self.status = "error"
-            await self.on_event({"type": "error", "detail": readable_error(exc)})
-        finally:
-            async with _image_thread_registry_lock:
-                _image_thread_jobs.pop(self.sid, None)
+                await self.on_event(
+                    {
+                        "type": "complete",
+                        "text": result_text or "",
+                        "saved_image": saved_filename,
+                    }
+                )
+            except asyncio.CancelledError:
+                self.status = "cancelled"
+                logger.warning("[image_thread_job] execute cancelled | sid=%s", self.sid)
+                await self.on_event({"type": "error", "detail": "已取消目前流程。"})
+                raise
+            except Exception as exc:
+                self.status = "error"
+                logger.error("[image_thread_job] execute failed | sid=%s err=%s", self.sid, exc)
+                await self.on_event({"type": "error", "detail": readable_error(exc)})
+            finally:
+                async with _image_thread_registry_lock:
+                    _image_thread_jobs.pop(self.sid, None)
+                logger.info("[image_thread_job] execute end | sid=%s status=%s", self.sid, self.status)
 
 
 async def cancel_image_thread_run(root: str, sid: str) -> bool:
     async with _image_thread_registry_lock:
         job = _image_thread_jobs.get(sid)
     if not job or not job.task or job.task.done():
+        logger.info("[image_thread_job] cancel skipped | sid=%s", sid, extra=log_extra(sid, None))
         return False
+    logger.info("[image_thread_job] cancel requested | sid=%s", sid, extra=log_extra(sid, None))
     job.task.cancel()
     try:
         await job.task
@@ -414,6 +457,7 @@ async def cancel_image_thread_run(root: str, sid: str) -> bool:
 
 
 async def subscribe_image_thread_events(root: str, sid: str, from_seq: int = 0):
+    logger.debug("[image_thread_job] subscribe start | sid=%s from_seq=%d", sid, from_seq, extra=log_extra(sid, None))
     async with _image_thread_registry_lock:
         job = _image_thread_jobs.get(sid)
     if job:
@@ -434,6 +478,7 @@ async def subscribe_image_thread_events(root: str, sid: str, from_seq: int = 0):
 
     data = read_image_thread_job_disk(root, sid)
     if not data:
+        logger.warning("[image_thread_job] subscribe no record | sid=%s", sid, extra=log_extra(sid, None))
         yield {"type": "error", "detail": "此 session 沒有可訂閱的執行紀錄。"}
         return
     if data.get("status") == "running":
@@ -461,6 +506,7 @@ async def precheck_and_spawn_image_thread(
     user_text: str,
     session_title: str,
     selected_style_profile_id: str | None,
+    request_id: str | None = None,
 ) -> None:
     async with _image_thread_registry_lock:
         existing = _image_thread_jobs.get(sid)
@@ -472,6 +518,11 @@ async def precheck_and_spawn_image_thread(
                     status_code=409,
                     detail="此對話已有任務執行中，請等待完成或先停止。",
                 )
+            logger.info(
+                "[image_thread_job] reuse existing running job | sid=%s",
+                sid,
+                extra=log_extra(sid, existing.request_id or request_id),
+            )
             return
         new_job = ImageThreadJob(
             root=root,
@@ -479,6 +530,7 @@ async def precheck_and_spawn_image_thread(
             user_text=user_text,
             session_title=session_title,
             selected_style_profile_id=selected_style_profile_id,
+            request_id=request_id,
         )
         initial = new_job._snapshot()
         await asyncio.to_thread(_persist_snapshot, root, sid, initial)
@@ -486,3 +538,4 @@ async def precheck_and_spawn_image_thread(
         new_job.task = asyncio.create_task(
             new_job._execute(), name=f"image_thread_{sid}"
         )
+    logger.info("[image_thread_job] spawned new job | sid=%s", sid, extra=log_extra(sid, request_id))

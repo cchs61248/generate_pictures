@@ -6,11 +6,28 @@ import contextlib
 import json
 import os
 import re
+import uuid
 from collections.abc import AsyncIterator
 from typing import Any
 
 from fastapi import HTTPException
 from fastapi.responses import StreamingResponse
+
+from core.app_logging import get_backend_logger
+
+logger = get_backend_logger("deps")
+
+
+def new_request_id() -> str:
+    """產生短 request id，供跨模組 log 串聯。"""
+    return uuid.uuid4().hex[:12]
+
+
+def log_extra(session_id: str | None = None, request_id: str | None = None) -> dict[str, str]:
+    return {
+        "sid": session_id or "-",
+        "rid": request_id or "-",
+    }
 
 
 def project_root() -> str:
@@ -29,6 +46,7 @@ def safe_session_id(session_id: str | None) -> str | None:
     if not sid:
         return None
     if not re.fullmatch(r"[A-Za-z0-9_-]{1,128}", sid):
+        logger.warning("[deps] invalid session_id format: %s", sid)
         raise HTTPException(status_code=400, detail="invalid session_id")
     return sid
 
@@ -69,12 +87,14 @@ def require_session_upload_exists(session_id: str | None) -> None:
     """
     sid = safe_session_id(session_id)
     if not sid:
+        logger.warning("[deps] missing/invalid session_id before run")
         raise HTTPException(
             status_code=400,
             detail="請先上傳一張商品圖（缺少或無效的 session_id）。",
         )
     path = os.path.join(project_root(), "uploads", f"{sid}.jpg")
     if not os.path.isfile(path):
+        logger.warning("[deps] upload image missing | sid=%s path=%s", sid, path)
         raise HTTPException(
             status_code=400,
             detail="請先上傳一張商品圖後再執行。",
@@ -91,6 +111,12 @@ def apply_session_sample_path(config, session_id: str | None):
     if sid:
         template_dir = os.path.join(root, "template_json")
         config.final_output_path = os.path.join(template_dir, f"final_output_{sid}.json")
+    logger.debug(
+        "[deps] apply session paths | sid=%s sample=%s final_json=%s",
+        sid or "(none)",
+        config.sample_image_path,
+        config.final_output_path,
+    )
     return config
 
 
@@ -119,6 +145,7 @@ def load_session_document_texts(root: str, sid: str | None) -> list[str]:
             text = extract_text(os.path.join(uploads_dir, fname))
             if text.strip():
                 texts.append(text)
+    logger.info("[deps] loaded session document texts | sid=%s count=%d", sid, len(texts))
     return texts
 
 
@@ -139,6 +166,7 @@ def load_session_documents(root: str, sid: str | None) -> list[dict[str, str]]:
             text = extract_text(os.path.join(uploads_dir, fname))
             if text.strip():
                 docs.append({"filename": fname, "text": text})
+    logger.info("[deps] loaded session documents | sid=%s count=%d", sid, len(docs))
     return docs
 
 
@@ -164,9 +192,11 @@ async def sse_streaming_response(generator_func, request) -> StreamingResponse:
 
         queue: asyncio.Queue = asyncio.Queue()
         task = asyncio.create_task(generator_func(queue))
+        logger.debug("[deps] SSE streaming_response started")
         try:
             while True:
                 if await request.is_disconnected():
+                    logger.debug("[deps] SSE streaming_response disconnected")
                     task.cancel()
                     break
                 try:
@@ -175,6 +205,7 @@ async def sse_streaming_response(generator_func, request) -> StreamingResponse:
                     continue
                 yield _encode_sse(item)
                 if item.get("type") in ("complete", "error"):
+                    logger.debug("[deps] SSE streaming_response terminal event=%s", item.get("type"))
                     break
         finally:
             if not task.done():
@@ -210,11 +241,14 @@ async def sse_streaming_detached(
             return f"data: {json.dumps(item, ensure_ascii=False)}\n\n"
 
         try:
+            logger.debug("[deps] SSE detached stream started")
             async for item in event_source:
                 if await request.is_disconnected():
+                    logger.debug("[deps] SSE detached disconnected")
                     break
                 yield _encode_sse(item)
                 if item.get("type") in ("complete", "error"):
+                    logger.debug("[deps] SSE detached terminal event=%s", item.get("type"))
                     break
         finally:
             aclose = getattr(event_source, "aclose", None)

@@ -12,15 +12,18 @@ from typing import Any
 
 from fastapi import HTTPException
 
+from core.app_logging import get_backend_logger, log_context
 from api.deps import (
     apply_session_sample_path,
     load_session_documents,
+    log_extra,
     readable_error,
 )
 from core.config import parse_config, sync_managed_env_from_dotenv
 from api.routers.tools.ecommerce_image.pipeline import run_pipeline
 
 MAX_RUN_JOB_EVENTS = 3000
+logger = get_backend_logger("ecommerce.run_job")
 
 _jobs: dict[str, "RunJob"] = {}
 _registry_lock = asyncio.Lock()
@@ -66,7 +69,8 @@ def read_run_job_disk(root: str, sid: str) -> dict[str, Any] | None:
             with open(path, "r", encoding="utf-8") as f:
                 data = json.load(f)
             return data if isinstance(data, dict) else None
-        except Exception:
+        except Exception as exc:
+            logger.warning("[run_job] read disk failed | sid=%s err=%s", sid, exc)
             return None
 
 
@@ -93,6 +97,7 @@ def repair_stale_running_on_disk(root: str, sid: str) -> None:
     data = read_run_job_disk(root, sid)
     if not data or data.get("status") != "running":
         return
+    logger.warning("[run_job] repair stale running snapshot | sid=%s", sid)
     ev = list(data.get("events") or [])
     ev.append(
         {
@@ -153,12 +158,14 @@ class RunJob:
         user_input: str | None,
         stage3_only: bool,
         selected_style_profile_id: str | None,
+        request_id: str | None,
     ) -> None:
         self.root = root
         self.sid = sid
         self.user_input = user_input
         self.stage3_only = stage3_only
         self.selected_style_profile_id = selected_style_profile_id
+        self.request_id = request_id
         self.status = "running"
         self.events: list[dict[str, Any]] = []
         self._next_seq = 1
@@ -208,6 +215,13 @@ class RunJob:
             snap = self._snapshot()
             queues = list(self._subscribers)
         await asyncio.to_thread(_persist_snapshot, self.root, self.sid, snap)
+        logger.debug(
+            "[run_job] event appended | sid=%s type=%s seq=%s",
+            self.sid,
+            ev.get("type"),
+            ev.get("seq"),
+            extra=log_extra(self.sid, self.request_id),
+        )
         for q in queues:
             try:
                 q.put_nowait(ev)
@@ -235,41 +249,56 @@ class RunJob:
             self._subscribers.discard(q)
 
     async def _execute_pipeline(self) -> None:
-        try:
-            sync_managed_env_from_dotenv(os.path.join(self.root, ".env"))
-            config = parse_config(stage3_only_flag=self.stage3_only)
-            config = apply_session_sample_path(config, self.sid)
-            docs = load_session_documents(self.root, config.session_id or self.sid)
-            doc_texts = [d["text"] for d in docs]
-            doc_filenames = [d["filename"] for d in docs]
-            loop = asyncio.get_running_loop()
-            sink = RunJobProgressSink(loop, self)
-            result = await run_pipeline(
-                config=config,
-                user_input=self.user_input,
-                doc_texts=doc_texts,
-                doc_filenames=doc_filenames,
-                progress=sink,
-                selected_style_profile_id=self.selected_style_profile_id,
+        with log_context(self.sid, self.request_id):
+            logger.info(
+                "[run_job] execute start | sid=%s stage3_only=%s style_profile=%s",
+                self.sid,
+                self.stage3_only,
+                self.selected_style_profile_id or "(default)",
             )
-            self.status = "completed"
-            await self.on_event(
-                {
-                    "type": "complete",
-                    "saved_files": result["saved_files"],
-                    "final_output_path": result["final_output_path"],
-                }
-            )
-        except asyncio.CancelledError:
-            self.status = "cancelled"
-            await self.on_event({"type": "error", "detail": "已取消目前流程。"})
-            raise
-        except Exception as exc:
-            self.status = "error"
-            await self.on_event({"type": "error", "detail": readable_error(exc)})
-        finally:
-            async with _registry_lock:
-                _jobs.pop(self.sid, None)
+            try:
+                sync_managed_env_from_dotenv(os.path.join(self.root, ".env"))
+                config = parse_config(stage3_only_flag=self.stage3_only)
+                config = apply_session_sample_path(config, self.sid)
+                docs = load_session_documents(self.root, config.session_id or self.sid)
+                doc_texts = [d["text"] for d in docs]
+                doc_filenames = [d["filename"] for d in docs]
+                loop = asyncio.get_running_loop()
+                sink = RunJobProgressSink(loop, self)
+                result = await run_pipeline(
+                    config=config,
+                    user_input=self.user_input,
+                    doc_texts=doc_texts,
+                    doc_filenames=doc_filenames,
+                    progress=sink,
+                    selected_style_profile_id=self.selected_style_profile_id,
+                )
+                self.status = "completed"
+                logger.info(
+                    "[run_job] execute completed | sid=%s saved=%d",
+                    self.sid,
+                    len(result["saved_files"]),
+                )
+                await self.on_event(
+                    {
+                        "type": "complete",
+                        "saved_files": result["saved_files"],
+                        "final_output_path": result["final_output_path"],
+                    }
+                )
+            except asyncio.CancelledError:
+                self.status = "cancelled"
+                logger.warning("[run_job] execute cancelled | sid=%s", self.sid)
+                await self.on_event({"type": "error", "detail": "已取消目前流程。"})
+                raise
+            except Exception as exc:
+                self.status = "error"
+                logger.error("[run_job] execute failed | sid=%s err=%s", self.sid, exc)
+                await self.on_event({"type": "error", "detail": readable_error(exc)})
+            finally:
+                async with _registry_lock:
+                    _jobs.pop(self.sid, None)
+                logger.info("[run_job] execute end | sid=%s status=%s", self.sid, self.status)
 
 
 def _normalize_user_input(u: str | None) -> str:
@@ -281,7 +310,9 @@ async def cancel_ecommerce_run(root: str, sid: str) -> bool:
     async with _registry_lock:
         job = _jobs.get(sid)
     if not job or not job.task or job.task.done():
+        logger.info("[run_job] cancel skipped | sid=%s", sid, extra=log_extra(sid, None))
         return False
+    logger.info("[run_job] cancel requested | sid=%s", sid, extra=log_extra(sid, None))
     job.task.cancel()
     try:
         await job.task
@@ -294,6 +325,7 @@ async def cancel_ecommerce_run(root: str, sid: str) -> bool:
 
 async def subscribe_session_events(root: str, sid: str, from_seq: int = 0):
     """重播 + 即時事件；斷線時由呼叫端停止迭代，不取消背景 Task。"""
+    logger.debug("[run_job] subscribe start | sid=%s from_seq=%d", sid, from_seq, extra=log_extra(sid, None))
     async with _registry_lock:
         job = _jobs.get(sid)
     if job:
@@ -314,6 +346,7 @@ async def subscribe_session_events(root: str, sid: str, from_seq: int = 0):
 
     data = read_run_job_disk(root, sid)
     if not data:
+        logger.warning("[run_job] subscribe no record | sid=%s", sid, extra=log_extra(sid, None))
         yield {"type": "error", "detail": "此 session 沒有可訂閱的執行紀錄。"}
         return
     if data.get("status") == "running":
@@ -341,6 +374,7 @@ async def precheck_and_spawn_run(
     user_input: str | None,
     stage3_only: bool,
     selected_style_profile_id: str | None,
+    request_id: str | None = None,
 ) -> None:
     """
     於回傳 StreamingResponse 前呼叫（單一 lock）：若已有任務且參數不同則 409；
@@ -356,6 +390,11 @@ async def precheck_and_spawn_run(
                     status_code=409,
                     detail="此對話已有任務執行中，請等待完成或先停止。",
                 )
+            logger.info(
+                "[run_job] reuse existing running job | sid=%s",
+                sid,
+                extra=log_extra(sid, existing.request_id or request_id),
+            )
             return
         new_job = RunJob(
             root=root,
@@ -363,6 +402,7 @@ async def precheck_and_spawn_run(
             user_input=user_input,
             stage3_only=stage3_only,
             selected_style_profile_id=selected_style_profile_id,
+            request_id=request_id,
         )
         initial = new_job._snapshot()
         await asyncio.to_thread(_persist_snapshot, root, sid, initial)
@@ -370,3 +410,9 @@ async def precheck_and_spawn_run(
         new_job.task = asyncio.create_task(
             new_job._execute_pipeline(), name=f"ecommerce_run_{sid}"
         )
+    logger.info(
+        "[run_job] spawned new job | sid=%s stage3_only=%s",
+        sid,
+        stage3_only,
+        extra=log_extra(sid, request_id),
+    )

@@ -10,6 +10,7 @@ import os
 from fastapi import APIRouter, HTTPException
 
 from api.deps import project_root
+from core.app_logging import get_backend_logger
 from core.config import (
     DEFAULT_IMAGE_MODEL,
     DEFAULT_TEXT_MODEL,
@@ -24,10 +25,12 @@ from core.config import (
 )
 
 router = APIRouter(tags=["settings"])
+logger = get_backend_logger("settings.router")
 
 
 @router.get("/settings/env")
 async def get_env_settings():
+    logger.info("[settings] GET /settings/env")
     """回傳受管理環境變數的說明與目前值（來自專案 .env）；隱藏鍵不列出，供設定頁使用。"""
     root = project_root()
     env_path = os.path.join(root, ".env")
@@ -61,12 +64,15 @@ async def get_env_settings():
 
 @router.put("/settings/env")
 async def put_env_settings(payload: dict):
+    logger.info("[settings] PUT /settings/env")
     """寫入 .env 並立即套用至目前後端行程。values 可只包含要變更的鍵，其餘沿用檔案現值。"""
     raw = payload.get("values")
     if not isinstance(raw, dict):
+        logger.warning("[settings] invalid values payload")
         raise HTTPException(status_code=400, detail="values must be an object")
     for k in raw:
         if k not in MANAGED_ENV_KEYS:
+            logger.warning("[settings] unknown env key: %s", k)
             raise HTTPException(status_code=400, detail=f"unknown env key: {k}")
 
     root = project_root()
@@ -81,8 +87,10 @@ async def put_env_settings(payload: dict):
         elif isinstance(val, str):
             merged[key] = val
         else:
+            logger.warning("[settings] invalid value type for key=%s", key)
             raise HTTPException(status_code=400, detail=f"invalid value for {key}")
 
     write_managed_env_file(env_path, merged)
     sync_managed_env_from_dotenv(env_path)
+    logger.info("[settings] PUT done | updated_keys=%d", len(raw))
     return {"ok": True}

@@ -5,6 +5,7 @@ import threading
 import time
 from datetime import datetime, timezone
 
+from core.app_logging import get_backend_logger
 from core.config import get_text_model
 from core.token_logger import log_token_usage
 from google.genai import types as genai_types
@@ -20,6 +21,7 @@ MAX_EVENT_CHARS = 2000
 MAX_PROFILE_PROMPT_CHARS = 1400
 
 _lock = threading.Lock()
+logger = get_backend_logger("style_learning.service")
 
 
 def _utc_now_iso() -> str:
@@ -151,6 +153,7 @@ def append_learning_event(
     model_text: str,
     image_path: str | None = None,
 ) -> dict:
+    logger.debug("[style_learning] append event | sid=%s has_image=%s", session_id, bool(image_path))
     event = {
         "event_id": f"evt_{int(time.time() * 1000)}_{os.urandom(4).hex()}",
         "timestamp": _utc_now_iso(),
@@ -198,6 +201,7 @@ def delete_queue_events(root: str, event_ids: list[str], actor: str = "manual-ui
                     "actor": actor,
                 },
             )
+    logger.info("[style_learning] queue delete | actor=%s deleted=%d", actor, deleted)
     return {"deleted": deleted, "remaining": len(kept)}
 
 
@@ -238,6 +242,7 @@ def restore_queue_events(root: str, event_ids: list[str], actor: str = "manual-u
 
         pending = len([i for i in next_queue if i.get("status") == "pending"])
         extracted = len([i for i in next_queue if i.get("status") == "extracted"])
+    logger.info("[style_learning] queue restore | actor=%s restored=%d", actor, restored)
     return {"restored": restored, "pending": pending, "extracted": extracted}
 
 
@@ -354,6 +359,7 @@ def extract_style_profile(
     base_style_prompt: str,
     actor: str = "manual-ui",
 ) -> dict:
+    logger.info("[style_learning] extract start | actor=%s", actor)
     with _lock:
         qpath = _queue_path(root)
         ppath = _profile_path(root)
@@ -364,6 +370,7 @@ def extract_style_profile(
         pending_items = [i for i in normalized_queue if i.get("status") == "pending"]
         queue_before = len(pending_items)
         if queue_before == 0:
+            logger.info("[style_learning] extract skipped; pending queue empty")
             return {
                 "ok": False,
                 "reason": "pending queue is empty",
@@ -378,6 +385,7 @@ def extract_style_profile(
         if not isinstance(profiles, list):
             profiles = []
         if len(profiles) >= MAX_PROFILE_HISTORY:
+            logger.warning("[style_learning] extract blocked; profile limit reached=%d", len(profiles))
             return {
                 "ok": False,
                 "reason": "profile_limit_reached",
@@ -397,6 +405,7 @@ def extract_style_profile(
         lines.append(f"[{idx}] user: {user_text}")
         lines.append(f"[{idx}] model: {model_text}")
     if not lines:
+        logger.info("[style_learning] extract skipped; no usable text")
         return {
             "ok": False,
             "reason": "queue has no usable text",
@@ -523,6 +532,13 @@ def extract_style_profile(
             history = history[-300:]
         _write_json_atomic(hpath, history)
 
+    logger.info(
+        "[style_learning] extract done | version=%d profile_id=%s queue_before=%d queue_after=%d",
+        version,
+        new_id,
+        queue_before,
+        max(0, queue_before - len(samples)),
+    )
     return {
         "ok": True,
         "profile": new_profile,
@@ -576,6 +592,7 @@ def rename_profile(
                 "actor": actor,
             },
         )
+    logger.info("[style_learning] profile renamed | profile_id=%s", pid)
     return {"ok": True, "profile_id": pid, "name": found["name"]}
 
 
@@ -614,6 +631,7 @@ def rollback_profile(root: str, profile_id: str, actor: str = "manual-ui") -> di
                 "actor": actor,
             },
         )
+    logger.info("[style_learning] rollback done | profile_id=%s actor=%s", pid, actor)
     return {"ok": True, "default_profile_id": pid}
 
 
@@ -663,6 +681,7 @@ def delete_profile(root: str, profile_id: str, actor: str = "manual-ui") -> dict
             },
         )
 
+    logger.info("[style_learning] profile deleted | profile_id=%s actor=%s", pid, actor)
     return {
         "ok": True,
         "deleted_profile_id": pid,

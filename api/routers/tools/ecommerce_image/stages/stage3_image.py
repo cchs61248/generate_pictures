@@ -21,6 +21,13 @@ from api.routers.tools.ecommerce_image.services.image_process import build_safe_
 logger = get_backend_logger("stages.stage3_image")
 
 
+def _preview_text(text: str, limit: int = 280) -> str:
+    compact = " ".join((text or "").split())
+    if len(compact) <= limit:
+        return compact
+    return compact[:limit] + "...(truncated)"
+
+
 def _extract_pil_image(generated_image) -> Image.Image | None:
     if isinstance(generated_image, Image.Image):
         return generated_image
@@ -60,7 +67,17 @@ async def generate_all_images(
     progress: ProgressBus | None = None,
     selected_style_profile_id: str | None = None,
 ) -> list[str]:
-    logger.info("[階段三] 正在為每張圖生成 AI 圖片，請稍候...")
+    logger.info("[stage3] enter generate_all_images")
+    logger.info("[stage3] 開始批次產圖")
+    logger.debug(
+        "[stage3] args | items=%d use_webapi=%s use_hybrid=%s picture_dir=%s session_id=%s selected_style_profile_id=%s",
+        len(final_data or []),
+        use_webapi,
+        use_hybrid,
+        picture_dir,
+        session_id or "(none)",
+        selected_style_profile_id or "(default)",
+    )
     os.makedirs(picture_dir, exist_ok=True)
 
     saved_files: list[str] = []
@@ -75,11 +92,11 @@ async def generate_all_images(
         safe_name = build_safe_name(main_name)
         group_id = f"stage3_p{sort_num:02d}"
 
-        logger.info(
-            "[LLM prompt] stage3_image · P%02d %s (plus reference product image)\n%s",
+        logger.info("[stage3] P%02d begin | main=%s", sort_num, main_name)
+        logger.debug(
+            "[stage3] P%02d prompt preview: %s",
             sort_num,
-            main_name,
-            image_prompt.strip(),
+            _preview_text(image_prompt, 700),
         )
 
         # 讓前端每張圖一個獨立泡泡（可摺疊工作紀錄）
@@ -97,6 +114,7 @@ async def generate_all_images(
         try:
             raw_image = None
             if use_webapi or use_hybrid:
+                logger.debug("[stage3] P%02d image generation path=webapi", sort_num)
                 generated_images = await generate_image_webapi(
                     gemini_client,
                     image_prompt,
@@ -124,6 +142,7 @@ async def generate_all_images(
                         f"Web API 產圖格式不支援，型別={type(generated_image).__name__}，可見屬性: {preview}"
                     )
             else:
+                logger.debug("[stage3] P%02d image generation path=api_key", sort_num)
                 response = await asyncio.to_thread(
                     generate_image_with_retry,
                     genai_client,
@@ -133,6 +152,12 @@ async def generate_all_images(
                 )
                 usage = getattr(response, "usage_metadata", None)
                 if usage is not None:
+                    logger.debug(
+                        "[stage3] P%02d usage_metadata | prompt_tokens=%s output_tokens=%s",
+                        sort_num,
+                        getattr(usage, "prompt_token_count", 0) or 0,
+                        getattr(usage, "candidates_token_count", 0) or 0,
+                    )
                     try:
                         log_token_usage(
                             model=get_image_model(),
@@ -168,6 +193,7 @@ async def generate_all_images(
             resized.save(file_path, "PNG")
             ok_line = f"  ✅ 已儲存（1000×1000）：{file_path}"
             logger.info(ok_line)
+            logger.debug("[stage3] P%02d saved file name=%s", sort_num, filename)
             if progress:
                 await progress.emit(
                     {
@@ -186,6 +212,7 @@ async def generate_all_images(
                     }
                 )
             saved_files.append(file_path)
+            logger.info("[stage3] P%02d done", sort_num)
         except Exception as exc:
             err = f"  ❌ P{sort_num:02d} 圖片生成失敗：{exc}"
             logger.error(err)
@@ -207,4 +234,5 @@ async def generate_all_images(
     if progress:
         await progress.emit({"type": "text_block", "format": "plain", "content": done_msg})
 
+    logger.info("[stage3] exit generate_all_images | saved=%d", len(saved_files))
     return saved_files

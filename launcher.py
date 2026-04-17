@@ -14,6 +14,7 @@ from playwright.sync_api import Error as PlaywrightError
 from playwright.sync_api import sync_playwright
 
 from api.server import app
+from core.app_logging import get_backend_logger, setup_app_logging
 
 
 if getattr(sys, "frozen", False):
@@ -27,6 +28,7 @@ API_HOST = "127.0.0.1"
 API_PORT = 8000
 FRONTEND_HOST = "127.0.0.1"
 FRONTEND_PORT = 5173
+logger = get_backend_logger("launcher")
 
 
 def get_screen_size() -> tuple[int, int]:
@@ -84,7 +86,7 @@ def open_browser_with_playwright(url: str) -> None:
                     "--window-position=0,0",
                 ],
             )
-            print("[launcher] 使用內建 Playwright Chromium 開啟瀏覽器。")
+            logger.info("[launcher] 使用內建 Playwright Chromium 開啟瀏覽器")
         except PlaywrightError as exc:
             raise RuntimeError(
                 "找不到內建 Playwright Chromium。請先執行 "
@@ -96,8 +98,8 @@ def open_browser_with_playwright(url: str) -> None:
         context = browser.new_context(no_viewport=True)
         page = context.new_page()
         page.goto(url)
-        print(f"[launcher] 已開啟瀏覽器：{url}")
-        print("[launcher] 關閉瀏覽器或按 Ctrl+C 可結束程式。")
+        logger.info("[launcher] 已開啟瀏覽器：%s", url)
+        logger.info("[launcher] 關閉瀏覽器或按 Ctrl+C 可結束程式")
         try:
             while browser.is_connected():
                 time.sleep(1)
@@ -109,29 +111,30 @@ def open_browser_with_playwright(url: str) -> None:
 def main() -> None:
     os.environ["APP_RUNTIME_ROOT"] = str(RUNTIME_ROOT)
     os.chdir(RUNTIME_ROOT)
-    print(f"[launcher] 執行資料目錄：{RUNTIME_ROOT}")
-    print("[launcher] 啟動後端服務...")
+    setup_app_logging(str(RUNTIME_ROOT))
+    logger.info("[launcher] 執行資料目錄：%s", RUNTIME_ROOT)
+    logger.info("[launcher] 啟動後端服務")
     backend_server, _ = start_backend_server()
-    print("[launcher] 啟動前端靜態服務...")
+    logger.info("[launcher] 啟動前端靜態服務")
     frontend_server, _ = start_frontend_server()
     try:
         open_browser_with_playwright(f"http://{FRONTEND_HOST}:{FRONTEND_PORT}")
     except KeyboardInterrupt:
-        print("\n[launcher] 接收到中斷訊號，準備關閉服務...")
+        logger.info("[launcher] 接收到中斷訊號，準備關閉服務")
     except Exception as exc:
-        print(f"[launcher] 自動開啟瀏覽器失敗：{exc}")
-        print(f"[launcher] 你仍可手動開啟：http://{FRONTEND_HOST}:{FRONTEND_PORT}")
-        print("[launcher] 按 Ctrl+C 結束程式。")
+        logger.error("[launcher] 自動開啟瀏覽器失敗：%s", exc)
+        logger.info("[launcher] 你仍可手動開啟：http://%s:%d", FRONTEND_HOST, FRONTEND_PORT)
+        logger.info("[launcher] 按 Ctrl+C 結束程式")
         try:
             while True:
                 time.sleep(1)
         except KeyboardInterrupt:
-            print("\n[launcher] 接收到中斷訊號，準備關閉服務...")
+            logger.info("[launcher] 接收到中斷訊號，準備關閉服務")
     finally:
         frontend_server.shutdown()
         frontend_server.server_close()
         backend_server.should_exit = True
-        print("[launcher] 已關閉。")
+        logger.info("[launcher] 已關閉")
 
 
 if __name__ == "__main__":

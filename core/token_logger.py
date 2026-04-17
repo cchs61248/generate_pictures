@@ -9,7 +9,10 @@ import os
 import threading
 from datetime import datetime, timezone
 
+from core.app_logging import get_backend_logger
+
 _lock = threading.Lock()
+logger = get_backend_logger("token_logger")
 
 
 def _data_dir() -> str:
@@ -44,6 +47,13 @@ def log_token_usage(
         "output_tokens": output_tokens,
     }
     path = _usage_file()
+    logger.debug(
+        "[token_logger] append usage | model=%s source=%s input=%d output=%d",
+        model,
+        source,
+        input_tokens,
+        output_tokens,
+    )
     with _lock:
         os.makedirs(_data_dir(), exist_ok=True)
         if os.path.exists(path):
@@ -53,12 +63,14 @@ def log_token_usage(
                 if not isinstance(records, list):
                     records = []
             except Exception:
+                logger.warning("[token_logger] usage file broken; reset list")
                 records = []
         else:
             records = []
         records.append(record)
         with open(path, "w", encoding="utf-8") as f:
             json.dump(records, f, ensure_ascii=False, indent=2)
+    logger.debug("[token_logger] append done | total_records=%d", len(records))
 
 
 def read_token_usage(
@@ -77,6 +89,7 @@ def read_token_usage(
     """
     path = _usage_file()
     if not os.path.exists(path):
+        logger.debug("[token_logger] read skipped; file not found")
         return []
     with _lock:
         try:
@@ -85,9 +98,11 @@ def read_token_usage(
             if not isinstance(records, list):
                 return []
         except Exception:
+            logger.warning("[token_logger] read failed; return empty list")
             return []
 
     if not start_date and not end_date:
+        logger.debug("[token_logger] read done | records=%d no date filter", len(records))
         return records
 
     filtered = []
@@ -99,4 +114,11 @@ def read_token_usage(
         if end_date and date_str > end_date:
             continue
         filtered.append(r)
+    logger.debug(
+        "[token_logger] read done | records=%d filtered=%d start=%s end=%s",
+        len(records),
+        len(filtered),
+        start_date or "",
+        end_date or "",
+    )
     return filtered

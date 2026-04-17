@@ -30,6 +30,13 @@ _TOPIC_SEP = "-------------"
 logger = get_backend_logger("stages.stage2_json")
 
 
+def _preview_text(text: str, limit: int = 280) -> str:
+    compact = " ".join((text or "").split())
+    if len(compact) <= limit:
+        return compact
+    return compact[:limit] + "...(truncated)"
+
+
 def _format_final_data_markdown(final_data: list[dict]) -> str:
     """緊湊 Markdown：標題用【】粗體（與素材區塊 UI 參考一致），主題間用橫線分隔。"""
     blocks: list[str] = []
@@ -69,6 +76,14 @@ async def generate_json_plan(
     progress: ProgressBus | None = None,
     selected_style_profile_id: str | None = None,
 ) -> list[dict]:
+    logger.info("[stage2] enter generate_json_plan")
+    logger.debug(
+        "[stage2] args | use_webapi=%s output_json_path=%s selected_style_profile_id=%s gathered_info_chars=%d",
+        use_webapi,
+        output_json_path,
+        selected_style_profile_id or "(default)",
+        len(gathered_info or ""),
+    )
     if progress:
         await progress.emit(
             {
@@ -85,12 +100,17 @@ async def generate_json_plan(
             }
         )
 
-    logger.info("[階段二] 正在結合 json_schema 規範，生成最終的 AI 繪圖提示詞與文案...")
+    logger.info("[stage2] 結合 json_schema 規範產生 P1~P9 腳本")
     style_prompt = get_style_prompt_by_id(
         root=project_root(),
         selected_profile_id=selected_style_profile_id,
     )
     stage2_system_instruction = prompt_template + (style_prompt or "")
+    logger.debug(
+        "[stage2] prepared system instruction | style_prompt_enabled=%s chars=%d",
+        bool(style_prompt),
+        len(stage2_system_instruction),
+    )
 
     format_prompt = f"""
 請根據以下我為你收集好的商品資訊，以及我上傳的商品圖片，
@@ -102,16 +122,18 @@ async def generate_json_plan(
 """
 
     logger.info(
-        "[LLM prompt] stage2_json · user message text (plus one product image)\n%s",
-        format_prompt.strip(),
+        "[stage2] built prompt payload | prompt_chars=%d",
+        len(format_prompt),
     )
+    logger.debug("[stage2] prompt preview: %s", _preview_text(format_prompt, 600))
     if not use_webapi:
-        logger.info(
-            "[LLM prompt] stage2_json · system_instruction (API key path only)\n%s",
-            stage2_system_instruction.strip(),
+        logger.debug(
+            "[stage2] system instruction preview: %s",
+            _preview_text(stage2_system_instruction, 600),
         )
 
     if use_webapi:
+        logger.info("[stage2] calling Gemini Web API")
         response = await gemini_client.generate_content(
             format_prompt + "\n\n" + stage2_system_instruction,
             model="gemini-3-flash-thinking",
@@ -119,6 +141,7 @@ async def generate_json_plan(
         )
         raw_output = response.text or ""
     else:
+        logger.info("[stage2] calling Gemini API-key model.generate_content")
         response = await asyncio.to_thread(
             genai_client.models.generate_content,
             model=get_text_model(),
@@ -131,6 +154,11 @@ async def generate_json_plan(
         )
         usage = getattr(response, "usage_metadata", None)
         if usage is not None:
+            logger.debug(
+                "[stage2] usage_metadata | prompt_tokens=%s output_tokens=%s",
+                getattr(usage, "prompt_token_count", 0) or 0,
+                getattr(usage, "candidates_token_count", 0) or 0,
+            )
             try:
                 log_token_usage(
                     model=get_text_model(),
@@ -141,6 +169,8 @@ async def generate_json_plan(
             except Exception:
                 pass
         raw_output = response.text or ""
+    logger.info("[stage2] received model response | raw_chars=%d", len(raw_output))
+    logger.debug("[stage2] raw output preview: %s", _preview_text(raw_output, 800))
 
     candidate = extract_json_candidate(raw_output)
     final_data = None
@@ -184,8 +214,10 @@ async def generate_json_plan(
                 }
             )
         if use_webapi:
+            logger.info("[stage2] repair path | webapi")
             repaired = await repair_to_json_webapi(gemini_client, raw_output)
         else:
+            logger.info("[stage2] repair path | api_key")
             repaired = await asyncio.to_thread(
                 repair_to_json_apikey, genai_client, raw_output
             )
@@ -194,14 +226,18 @@ async def generate_json_plan(
             raise ValueError(f"修復後仍不符合 JSON 規範：{reason}")
         final_data = repaired
 
-    logger.info("🤖 [最終輸出] JSON:\n%s", json.dumps(final_data, ensure_ascii=False, indent=2))
+    logger.info("[stage2] JSON validated | topics=%d", len(final_data))
+    logger.debug(
+        "[stage2] final JSON preview: %s",
+        _preview_text(json.dumps(final_data, ensure_ascii=False), 1200),
+    )
 
     out_dir = os.path.dirname(output_json_path)
     if out_dir:
         os.makedirs(out_dir, exist_ok=True)
     with open(output_json_path, "w", encoding="utf-8") as file:
         json.dump(final_data, file, ensure_ascii=False, indent=2)
-    logger.info("💾 [JSON 已儲存] %s", output_json_path)
+    logger.info("[stage2] JSON saved: %s", output_json_path)
     if progress:
         await progress.emit(
             {
@@ -218,4 +254,5 @@ async def generate_json_plan(
                 "content": f"🤖 **[圖片腳本]**\n\n{markdown_plan}",
             }
         )
+    logger.info("[stage2] exit generate_json_plan")
     return final_data

@@ -12,9 +12,12 @@ import os
 
 from fastapi import APIRouter, HTTPException, Request
 
+from core.app_logging import get_backend_logger
 from api.deps import (
     apply_session_sample_path,
     load_session_documents,
+    log_extra,
+    new_request_id,
     project_root,
     readable_error,
     require_session_upload_exists,
@@ -32,10 +35,13 @@ from core.config import parse_config, sync_managed_env_from_dotenv
 from core.progress import ProgressBus
 
 router = APIRouter(tags=["ecommerce-image"])
+logger = get_backend_logger("ecommerce.router")
 
 
 @router.post("/run")
 async def run_generation(payload: dict):
+    rid = new_request_id()
+    logger.info("[run] request received", extra=log_extra(request_id=rid))
     """同步執行三階段圖文生成 pipeline，完成後回傳結果路徑。"""
     stage3_only = bool(payload.get("stage3_only", False))
     user_input = payload.get("user_input")
@@ -52,6 +58,14 @@ async def run_generation(payload: dict):
     doc_filenames = [d["filename"] for d in docs]
 
     try:
+        logger.info(
+            "[run] execute pipeline | sid=%s stage3_only=%s docs=%d style_profile=%s",
+            config.session_id or "(none)",
+            stage3_only,
+            len(docs),
+            selected_style_profile_id or "(default)",
+            extra=log_extra(config.session_id or None, rid),
+        )
         result = await run_pipeline(
             config=config,
             user_input=user_input,
@@ -65,11 +79,14 @@ async def run_generation(payload: dict):
             "saved_files": result["saved_files"],
         }
     except Exception as exc:
+        logger.error("[run] failed: %s", exc, extra=log_extra(config.session_id or None, rid))
         raise HTTPException(status_code=400, detail=readable_error(exc)) from exc
 
 
 @router.post("/run-stream")
 async def run_generation_stream(payload: dict, request: Request):
+    rid = new_request_id()
+    logger.info("[run-stream] request received", extra=log_extra(request_id=rid))
     """以 SSE 串流各階段進度；背景執行，重新整理不會中止 pipeline。"""
     stage3_only = bool(payload.get("stage3_only", False))
     user_input = payload.get("user_input")
@@ -84,7 +101,14 @@ async def run_generation_stream(payload: dict, request: Request):
         raise HTTPException(status_code=400, detail="invalid session_id")
 
     await precheck_and_spawn_run(
-        root, sid, user_input, stage3_only, selected_style_profile_id
+        root, sid, user_input, stage3_only, selected_style_profile_id, request_id=rid
+    )
+    logger.info(
+        "[run-stream] subscribed | sid=%s stage3_only=%s style_profile=%s",
+        sid,
+        stage3_only,
+        selected_style_profile_id or "(default)",
+        extra=log_extra(sid, rid),
     )
 
     return await sse_streaming_detached(
@@ -97,6 +121,7 @@ async def run_generation_stream(payload: dict, request: Request):
 async def run_stream_subscribe(
     session_id: str, request: Request, from_seq: int = 0
 ):
+    logger.info("[run-stream/subscribe] request | session_id=%s from_seq=%d", session_id, from_seq)
     """僅訂閱該 session 既有 run 事件（重播 + 即時）；不要求上傳圖仍存在。"""
     root = project_root()
     sync_managed_env_from_dotenv(os.path.join(root, ".env"))
@@ -112,6 +137,7 @@ async def run_stream_subscribe(
 
 @router.get("/run/status")
 async def run_status(session_id: str):
+    logger.info("[run/status] request | session_id=%s", session_id)
     """回傳該 session 電商 run 狀態（記憶體或磁碟）。"""
     root = project_root()
     sid = safe_session_id(session_id)
@@ -122,10 +148,12 @@ async def run_status(session_id: str):
 
 @router.post("/run/cancel")
 async def run_cancel(payload: dict):
+    logger.info("[run/cancel] request received")
     """取消該 session 進行中的背景 pipeline。"""
     root = project_root()
     sid = safe_session_id(payload.get("session_id"))
     if not sid:
         raise HTTPException(status_code=400, detail="invalid session_id")
     cancelled = await cancel_ecommerce_run(root, sid)
+    logger.info("[run/cancel] done | sid=%s cancelled=%s", sid, cancelled)
     return {"ok": True, "cancelled": cancelled}

@@ -20,6 +20,13 @@ from services.web_search import fetch_webpage, get_max_llm_search_calls, make_bo
 logger = get_backend_logger("stages.stage1_gather")
 
 
+def _preview_text(text: str, limit: int = 280) -> str:
+    compact = " ".join((text or "").split())
+    if len(compact) <= limit:
+        return compact
+    return compact[:limit] + "...(truncated)"
+
+
 def _extract_urls(user_input: str) -> list[str]:
     url_re = re.compile(r"https?://[^\s<>'\"\]\)]+", re.IGNORECASE)
     dedup_urls: list[str] = []
@@ -65,6 +72,14 @@ async def gather_product_info(
     progress: ProgressBus | None = None,
     selected_style_profile_id: str | None = None,
 ) -> str:
+    logger.info("[stage1] enter gather_product_info")
+    logger.debug(
+        "[stage1] args | use_webapi=%s doc_count=%d has_image_path=%s selected_style_profile_id=%s",
+        use_webapi,
+        len(doc_texts or []),
+        bool(image_path),
+        selected_style_profile_id or "(default)",
+    )
     ctx_token = None
     if progress:
         await progress.emit(
@@ -83,8 +98,11 @@ async def gather_product_info(
         )
         ctx_token = progress_cv.set(progress)
 
-    logger.info("[階段一] 正在分析圖片與聯網收集商品資訊，請稍候...")
+    logger.info("[stage1] 分析圖片與聯網蒐集商品資訊")
     dedup_urls = _extract_urls(user_input)
+    logger.info("[stage1] extracted urls | count=%d", len(dedup_urls))
+    if dedup_urls:
+        logger.debug("[stage1] url list: %s", " | ".join(dedup_urls))
 
     if dedup_urls:
         url_mandatory_block = (
@@ -106,6 +124,11 @@ async def gather_product_info(
         selected_profile_id=selected_style_profile_id,
     )
     stage1_system_instruction = url_mandatory_block + (style_prompt or "")
+    logger.debug(
+        "[stage1] prepared system instruction | style_prompt_enabled=%s chars=%d",
+        bool(style_prompt),
+        len(stage1_system_instruction),
+    )
 
     doc_block = ""
     if doc_texts:
@@ -130,6 +153,11 @@ async def gather_product_info(
             + "\n\n".join(doc_sections)
             + "\n"
         )
+    logger.info(
+        "[stage1] prepared doc context | doc_count=%d doc_block_chars=%d",
+        len(doc_texts or []),
+        len(doc_block),
+    )
 
     info_prompt = f"""
 請仔細分析我上傳的商品圖片，並結合以下用戶提供的文字或網址資訊：
@@ -181,12 +209,15 @@ async def gather_product_info(
 """
 
     logger.info(
-        "[LLM prompt] stage1_gather · user text (plus one product image in request)\n%s",
-        info_prompt.strip(),
+        "[stage1] built prompt payload | prompt_chars=%d user_input_preview=%s",
+        len(info_prompt),
+        _preview_text(user_input, 120),
     )
+    logger.debug("[stage1] prompt preview: %s", _preview_text(info_prompt, 600))
 
     try:
         if use_webapi:
+            logger.info("[stage1] calling Gemini Web API")
             response = await gemini_client.generate_content(
                 stage1_system_instruction + "\n\n" + info_prompt,
                 model="gemini-3-flash-thinking",
@@ -194,6 +225,7 @@ async def gather_product_info(
             )
             gathered_info = _response_text_safe(response)
         else:
+            logger.info("[stage1] calling Gemini API-key chat tools flow")
             bounded_search = make_bounded_search_web()
             info_chat = genai_client.chats.create(
                 model=get_text_model(),
@@ -214,6 +246,11 @@ async def gather_product_info(
             )
             usage = getattr(response, "usage_metadata", None)
             if usage is not None:
+                logger.debug(
+                    "[stage1] usage_metadata | prompt_tokens=%s output_tokens=%s",
+                    getattr(usage, "prompt_token_count", 0) or 0,
+                    getattr(usage, "candidates_token_count", 0) or 0,
+                )
                 try:
                     log_token_usage(
                         model=get_text_model(),
@@ -225,7 +262,8 @@ async def gather_product_info(
                     pass
             gathered_info = _response_text_safe(response)
 
-        logger.info("✅ [階段一完成] 收集到的商品資訊如下：\n%s", gathered_info)
+        logger.info("[stage1] completed gather_product_info | output_chars=%d", len(gathered_info))
+        logger.debug("[stage1] gathered info preview: %s", _preview_text(gathered_info, 800))
         if progress:
             md = (
                 "✅ **[階段一完成]** 收集到的商品資訊如下：\n\n---\n\n"
@@ -238,3 +276,4 @@ async def gather_product_info(
     finally:
         if ctx_token is not None:
             progress_cv.reset(ctx_token)
+        logger.info("[stage1] exit gather_product_info")
