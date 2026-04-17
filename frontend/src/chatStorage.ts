@@ -150,11 +150,15 @@ export function loadPersistedState(): PersistedState | null {
     if (!Array.isArray(data.sessions) || typeof data.activeId !== "string") {
       return null
     }
-    // 向後相容：舊版沒有狀態欄位
+    const activeId = data.activeId
+    // backward compat: older builds lacked these fields
     data.sessions = data.sessions.map((s) => ({
       ...s,
-      // 重新整理後不延續「執行中」狀態
-      isRunning: false,
+      // full reload: keep isRunning only for activeId so /run/status can reconcile
+      isRunning:
+        s.id === activeId
+          ? Boolean((s as Partial<ChatSession>).isRunning)
+          : false,
       streamPrimed: false,
       taskCompleted: Boolean((s as Partial<ChatSession>).taskCompleted),
       clearOnNextSend: Boolean((s as Partial<ChatSession>).clearOnNextSend),

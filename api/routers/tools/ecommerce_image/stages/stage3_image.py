@@ -64,11 +64,11 @@ async def generate_all_images(
     os.makedirs(picture_dir, exist_ok=True)
 
     saved_files: list[str] = []
-    cnt = 0
+    # cnt = 0
     for item in final_data:
-        cnt += 1
-        if cnt >= 5:
-            break
+        # cnt += 1
+        # if cnt >= 5:
+        #     break
         sort_num = item["sort"]
         main_name = item["main"].replace('Prompt', '')
         image_prompt = compose_image_prompt(item)

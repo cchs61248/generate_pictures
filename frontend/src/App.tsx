@@ -334,6 +334,8 @@ export default function App() {
   const [, setThreadReferenceMissing] = useState(false)
   const [hydratedFromServer, setHydratedFromServer] = useState(false)
   const sessionVersionRef = useRef(0)
+  /** 防止舊的 session-state 同步流程覆蓋較新的前端狀態 */
+  const saveStateGenRef = useRef(0)
   /** 已刪除的 session ID 墓碑（只累加），確保跨瀏覽器同步刪除 */
   const deletedIdsRef = useRef<string[]>([])
   const runControllersRef = useRef<Map<string, AbortController>>(new Map())
@@ -579,11 +581,14 @@ export default function App() {
     // 快照：避免 closure 過舊
     const localSessions = sessions
     const localActiveId = activeId
+    saveStateGenRef.current += 1
+    const myGen = saveStateGenRef.current
 
     void (async () => {
       const localPending = pendingToolSessionRef.current
       // 最多重試 3 次，避免雙瀏覽器無限 409 循環
       for (let attempt = 0; attempt < 3; attempt++) {
+        if (myGen !== saveStateGenRef.current) return
         try {
           const saved = await saveSessionState(baseUrl, {
             sessions: localSessions,
@@ -592,6 +597,7 @@ export default function App() {
             expectedVersion: sessionVersionRef.current,
             deletedIds: deletedIdsRef.current,
           })
+          if (myGen !== saveStateGenRef.current) return
           sessionVersionRef.current = saved.version
           // 同步後端回傳的 deletedIds（後端已 merge，更新本地墓碑）
           if (saved.deletedIds && saved.deletedIds.length) {
@@ -601,6 +607,7 @@ export default function App() {
           }
           return
         } catch (e) {
+          if (myGen !== saveStateGenRef.current) return
           const msg = e instanceof Error ? e.message : String(e)
           if (msg !== "SESSION_STATE_CONFLICT") {
             // 後端暫時不可用，不阻斷操作
@@ -608,6 +615,7 @@ export default function App() {
           }
           // 409：GET 遠端最新，merge 後重試
           const remote = await fetchSessionState(baseUrl)
+          if (myGen !== saveStateGenRef.current) return
           if (!remote) return
           sessionVersionRef.current = remote.version
 
@@ -660,10 +668,12 @@ export default function App() {
   ])
 
   const activeSession = useMemo(() => {
+    const committed = sessions.find((s) => s.id === activeId)
+    if (committed) return committed
     if (pendingToolSession && pendingToolSession.id === activeId) {
       return pendingToolSession
     }
-    return sessions.find((s) => s.id === activeId)
+    return undefined
   }, [sessions, activeId, pendingToolSession])
   const sortedStyleProfiles = useMemo(() => {
     const defaultId = styleDefaultProfileId
@@ -1538,8 +1548,14 @@ export default function App() {
 
     // 若為暫存工具對話，送出時才正式加入 sessions
     if (pendingToolSession && pendingToolSession.id === activeId) {
-      setSessions((prev) => [pendingToolSession, ...prev])
-      setPendingToolSession(null)
+      const pendingToCommit = pendingToolSession
+      flushSync(() => {
+        setSessions((prev) => {
+          if (prev.some((s) => s.id === pendingToCommit.id)) return prev
+          return [pendingToCommit, ...prev]
+        })
+        setPendingToolSession(null)
+      })
     }
 
     let imageSnapshot: string | undefined
@@ -1613,6 +1629,8 @@ export default function App() {
     }))
 
     const sessionId = activeId
+    const aborter = new AbortController()
+    runControllersRef.current.set(sessionId, aborter)
     patchSession(sessionId, (s) => ({
       ...s,
       isRunning: true,
@@ -1620,8 +1638,6 @@ export default function App() {
       lastRunEventSeq: 0,
       updatedAt: Date.now(),
     }))
-    const aborter = new AbortController()
-    runControllersRef.current.set(sessionId, aborter)
 
     try {
       await consumeRunStream(
@@ -1722,17 +1738,28 @@ export default function App() {
         }
         if (myGen !== resumeRunGenRef.current) return
         if (aborter.signal.aborted) return
-        if (!st || st.status !== "running") return
+        if (!st || st.status !== "running") {
+          patchSession(sid, (s) =>
+            s.isRunning || s.streamPrimed
+              ? {
+                  ...s,
+                  isRunning: false,
+                  streamPrimed: false,
+                  updatedAt: Date.now(),
+                }
+              : s,
+          )
+          return
+        }
         if (runControllersRef.current.has(sid)) return
 
         patchSession(sid, (s) => ({
           ...s,
-          messages:
-            (s.lastRunEventSeq ?? 0) > 0
-              ? s.messages
-              : trimMessagesAfterLastUser(s.messages),
+          // 重連時以「最後一則 user 之後整段重建」為準，避免工具/系統泡泡因游標落差被跳過
+          messages: trimMessagesAfterLastUser(s.messages),
           isRunning: true,
           streamPrimed: false,
+          lastRunEventSeq: 0,
           updatedAt: Date.now(),
         }))
         if (myGen !== resumeRunGenRef.current) return
@@ -1745,7 +1772,7 @@ export default function App() {
             applyEcommerceRunStreamEventRef.current(sid, ev, meta)
           },
           aborter.signal,
-          sess.lastRunEventSeq ?? 0,
+          0,
         )
       } catch (e) {
         if (myGen !== resumeRunGenRef.current) return
