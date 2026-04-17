@@ -32,6 +32,10 @@ _ALLOWED_DOC_EXTS = {".txt", ".pdf", ".docx", ".doc", ".md"}
 from api.routers.tools.ecommerce_image.image_thread.service import (
     delete_image_thread_history,
 )
+from api.routers.tools.ecommerce_image.services.run_job import (
+    cancel_ecommerce_run,
+    delete_run_job_file,
+)
 
 router = APIRouter(tags=["media"])
 
@@ -104,6 +108,9 @@ async def delete_session_upload(session_id: str):
     sid = safe_session_id(session_id)
     if not sid:
         raise HTTPException(status_code=400, detail="invalid session_id")
+
+    await cancel_ecommerce_run(root, sid)
+    delete_run_job_file(root, sid)
 
     upload_path = os.path.join(root, "uploads", f"{sid}.jpg")
     json_path = os.path.join(root, "template_json", f"final_output_{sid}.json")

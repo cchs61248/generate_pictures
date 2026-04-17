@@ -539,6 +539,125 @@ export async function consumeRunStream(
   }
 }
 
+export type EcommerceRunStatusResponse = {
+  status: string
+  session_id?: string
+  has_active_task?: boolean
+  event_count?: number
+}
+
+/** Normalize /images/ URLs to current getApiBaseUrl() (avoid host mismatch). */
+export function normalizeImageUrlForCurrentApi(url: string): string {
+  const base = trimSlash(getApiBaseUrl())
+  const t = url.trim()
+  const m = t.match(/\/images\/([^?#]+)/)
+  if (m) {
+    const name = decodeURIComponent(m[1])
+    return `${base}/images/${encodeURIComponent(name)}`
+  }
+  if (t.startsWith("/images/")) {
+    return `${base}${t}`
+  }
+  return url
+}
+
+/** GET /run/status — background job still running (purge / reconnect). */
+export async function fetchEcommerceRunStatus(
+  sessionId: string,
+  baseUrl: string,
+  signal?: AbortSignal,
+): Promise<EcommerceRunStatusResponse> {
+  const res = await fetch(
+    `${trimSlash(baseUrl)}/run/status?session_id=${encodeURIComponent(sessionId)}`,
+    { signal },
+  )
+  if (!res.ok) {
+    const body = await safeJson(res)
+    const detail = extractDetail(body)
+    throw new Error(detail || `查詢任務狀態失敗 (${res.status})`)
+  }
+  return (await res.json()) as EcommerceRunStatusResponse
+}
+
+/** POST /run/cancel — 停止背景 pipeline */
+export async function cancelEcommerceRun(
+  sessionId: string,
+  baseUrl: string,
+): Promise<{ ok: boolean; cancelled: boolean }> {
+  const res = await fetch(`${trimSlash(baseUrl)}/run/cancel`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ session_id: sessionId }),
+  })
+  if (!res.ok) {
+    const body = await safeJson(res)
+    const detail = extractDetail(body)
+    throw new Error(detail || `取消任務失敗 (${res.status})`)
+  }
+  return (await res.json()) as { ok: boolean; cancelled: boolean }
+}
+
+/** GET /run-stream/subscribe — 重新整理後接續同一任務的 SSE */
+export async function consumeRunStreamSubscribe(
+  sessionId: string,
+  baseUrl: string,
+  onEvent: (event: StreamEvent) => void,
+  signal?: AbortSignal,
+): Promise<void> {
+  logFrontend(baseUrl, "info", "consumeRunStreamSubscribe started", { sessionId })
+  const res = await fetch(
+    `${trimSlash(baseUrl)}/run-stream/subscribe?session_id=${encodeURIComponent(sessionId)}`,
+    { signal },
+  )
+  if (!res.ok) {
+    const body = await safeJson(res)
+    const detail = extractDetail(body)
+    logFrontend(baseUrl, "error", "consumeRunStreamSubscribe request failed", {
+      status: res.status,
+      detail,
+      sessionId,
+    })
+    throw new Error(detail || `訂閱串流失敗 (${res.status})`)
+  }
+  const reader = res.body?.getReader()
+  if (!reader) {
+    throw new Error("無法讀取回應本文")
+  }
+  const decoder = new TextDecoder()
+  let buffer = ""
+  const dispatchSseBlock = (block: string) => {
+    const trimmed = block.trim()
+    if (!trimmed.startsWith("data:")) return
+    const jsonStr = trimmed.slice(5).trimStart()
+    try {
+      onEvent(JSON.parse(jsonStr) as StreamEvent)
+    } catch (err) {
+      logFrontend(baseUrl, "warning", "consumeRunStreamSubscribe parse failed", {
+        sessionId,
+        error: String(err),
+      })
+    }
+  }
+  while (true) {
+    const { done, value } = await reader.read()
+    if (value) buffer += decoder.decode(value, { stream: true })
+    const segments = buffer.split("\n\n")
+    buffer = segments.pop() ?? ""
+    for (const seg of segments) {
+      dispatchSseBlock(seg)
+    }
+    if (done) break
+  }
+  logFrontend(baseUrl, "info", "consumeRunStreamSubscribe completed", { sessionId })
+  const tail = buffer.trim()
+  if (tail) {
+    for (const line of tail.split("\n")) {
+      const t = line.trim()
+      if (t) dispatchSseBlock(t)
+    }
+  }
+}
+
 // ── Token 用量 ─────────────────────────────────────────────────────────────────
 
 export type TokenUsageRecord = {

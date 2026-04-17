@@ -9,18 +9,22 @@ import {
 import { flushSync } from "react-dom"
 import {
   type ChatMessage,
+  cancelEcommerceRun,
   consumeImageThreadStream,
   consumeRunStream,
+  consumeRunStreamSubscribe,
   deleteSessionDocument,
   deleteSessionDocuments,
   deleteSessionUpload,
   deleteSessionUploadImage,
+  fetchEcommerceRunStatus,
   fetchSessionState,
   getApiBaseUrl,
   imageUrlsFromSavedFiles,
   initImageThread,
   saveSessionState,
   fetchStyleLearningStatus,
+  type StreamEvent,
   type StyleProfile,
   uploadDocument,
   uploadImage,
@@ -50,6 +54,16 @@ const STORAGE_KEY = "gnerate_pictures_chat_v1"
 
 function newId(): string {
   return crypto.randomUUID()
+}
+
+/** 重新訂閱串流前移除最後一則 user 之後的 assistant 片段，避免與重播重複。 */
+function trimMessagesAfterLastUser(messages: ChatMessage[]): ChatMessage[] {
+  let lastUser = -1
+  for (let i = 0; i < messages.length; i++) {
+    if (messages[i].role === "user") lastUser = i
+  }
+  if (lastUser < 0) return messages
+  return messages.slice(0, lastUser + 1)
 }
 
 function createSession(toolId?: string, initialStyleProfileId = "none"): ChatSession {
@@ -122,8 +136,20 @@ function mergeSessionLists(
     const useLocalContent =
       (local.updatedAt ?? 0) >= (remoteSess.updatedAt ?? 0)
     const base = useLocalContent ? local : remoteSess
+    const taskCompleted =
+      Boolean(local.taskCompleted) || Boolean(remoteSess.taskCompleted)
+    const isRunning = taskCompleted
+      ? false
+      : local.isRunning || remoteSess.isRunning
+    const streamPrimed = taskCompleted
+      ? false
+      : local.streamPrimed || remoteSess.streamPrimed
     merged.push({
       ...base,
+      title: titleFromMessages(base.messages, base.title),
+      taskCompleted,
+      isRunning,
+      streamPrimed,
       // 訊息區捲動位置為本地 UI 狀態，與 updatedAt 無關；合併時優先保留任一端有紀錄者
       messagesScrollTop:
         local.messagesScrollTop ?? remoteSess.messagesScrollTop,
@@ -281,6 +307,8 @@ export default function App() {
     sessions: APP_BOOT.sessions,
     activeId: APP_BOOT.activeId,
   }))
+  const sessionsRef = useRef(sessions)
+  sessionsRef.current = sessions
   const [inputText, setInputText] = useState("")
   const [file, setFile] = useState<File | null>(null)
   const fileObjectUrl = useObjectUrlForFile(file)
@@ -307,6 +335,8 @@ export default function App() {
   /** 已刪除的 session ID 墓碑（只累加），確保跨瀏覽器同步刪除 */
   const deletedIdsRef = useRef<string[]>([])
   const runControllersRef = useRef<Map<string, AbortController>>(new Map())
+  /** StrictMode 會雙跑 effect；用世代號區分 abort 是否仍屬本輪，避免誤加「已停止」或清掉 isRunning */
+  const resumeRunGenRef = useRef(0)
   /** 由 ChatWindow 註冊：切換／新建對話前先寫入目前訊息區捲動位置 */
   const messagesScrollFlushRef = useRef<() => void>(() => {})
   const messagesScrollPersistTimerRef = useRef<ReturnType<
@@ -459,13 +489,21 @@ export default function App() {
   useEffect(() => {
     const ids = APP_BOOT.sessionIdsToDeleteUpload
     if (!ids.length) return
-    const seen = new Set<string>()
-    for (const id of ids) {
-      if (seen.has(id)) continue
-      seen.add(id)
-      void deleteSessionUploadImage(id, baseUrl).catch(() => {})
-      void deleteSessionDocuments(id, baseUrl).catch(() => {})
-    }
+    void (async () => {
+      const seen = new Set<string>()
+      for (const id of ids) {
+        if (seen.has(id)) continue
+        seen.add(id)
+        try {
+          const st = await fetchEcommerceRunStatus(id, baseUrl)
+          if (st.status === "running") continue
+        } catch {
+          /* 後端不可用時仍嘗試清理本機預期 purge */
+        }
+        void deleteSessionUploadImage(id, baseUrl).catch(() => {})
+        void deleteSessionDocuments(id, baseUrl).catch(() => {})
+      }
+    })()
   }, [baseUrl])
 
   useEffect(() => {
@@ -655,6 +693,8 @@ export default function App() {
   const activeStreaming = activeSession?.isRunning ?? false
   const activeStreamPrimed = activeSession?.streamPrimed ?? false
   const taskCompleted = activeSession?.taskCompleted ?? false
+  /** taskCompleted 時不顯示串流 UI，避免殘留 isRunning 與完成旗標不一致 */
+  const streamUiActive = activeStreaming && !taskCompleted
   const clearOnNextSend = activeSession?.clearOnNextSend ?? false
   const imageThreadLocked = activeSession?.imageThreadLocked ?? false
 
@@ -1253,6 +1293,115 @@ export default function App() {
     [activeId, baseUrl, docUploads, patchActiveSession],
   )
 
+  const applyEcommerceRunStreamEvent = useCallback(
+    (sessionId: string, ev: StreamEvent) => {
+      patchSession(sessionId, (s) => ({
+        ...s,
+        streamPrimed: true,
+        updatedAt: Date.now(),
+      }))
+      if (ev.type === "collapsible_init") {
+        patchSessionMessages(sessionId, (m) => [
+          ...m,
+          {
+            id: newId(),
+            role: "assistant",
+            collapsible: {
+              id: ev.group_id,
+              title: ev.title,
+              lines: [],
+            },
+          },
+        ])
+        return
+      }
+      if (ev.type === "collapsible_line") {
+        patchSessionMessages(sessionId, (m) => {
+          let lastIdx = -1
+          for (let i = 0; i < m.length; i++) {
+            if (m[i].collapsible?.id === ev.group_id) lastIdx = i
+          }
+          if (lastIdx < 0) return m
+          return m.map((msg, idx) => {
+            if (idx !== lastIdx) return msg
+            const c = msg.collapsible
+            if (!c) return msg
+            return {
+              ...msg,
+              collapsible: {
+                ...c,
+                lines: [...c.lines, ev.line],
+              },
+            }
+          })
+        })
+        return
+      }
+      if (ev.type === "text_block") {
+        const fmt =
+          ev.format === "markdown" || ev.format === "json"
+            ? "markdown"
+            : "plain"
+        patchSessionMessages(sessionId, (m) => [
+          ...m,
+          {
+            id: newId(),
+            role: "assistant",
+            text: ev.content,
+            textFormat: fmt,
+          },
+        ])
+        return
+      }
+      if (ev.type === "image_saved") {
+        const label = `P${Number(ev.sort).toString().padStart(2, "0")}`
+        const urls = imageUrlsFromSavedFiles([ev.saved_file], baseUrl)
+        patchSessionMessages(sessionId, (m) => [
+          ...m,
+          {
+            id: newId(),
+            role: "assistant",
+            text: `**${label}** ${ev.main}`,
+            textFormat: "markdown",
+            generatedImages: urls,
+          },
+        ])
+        return
+      }
+      if (ev.type === "complete") {
+        patchSession(sessionId, (s) => ({
+          ...s,
+          isRunning: false,
+          streamPrimed: false,
+          taskCompleted: true,
+          updatedAt: Date.now(),
+        }))
+        return
+      }
+      if (ev.type === "error") {
+        patchSessionMessages(sessionId, (m) => [
+          ...m,
+          {
+            id: newId(),
+            role: "assistant",
+            text: `執行失敗：${ev.detail}`,
+            error: true,
+          },
+        ])
+        patchSession(sessionId, (s) => ({
+          ...s,
+          isRunning: false,
+          streamPrimed: false,
+          updatedAt: Date.now(),
+        }))
+      }
+    },
+    [baseUrl, patchSession, patchSessionMessages],
+  )
+
+  const applyEcommerceRunStreamEventRef = useRef(applyEcommerceRunStreamEvent)
+  applyEcommerceRunStreamEventRef.current = applyEcommerceRunStreamEvent
+
   const handleSend = useCallback(async () => {
     if (taskCompleted) {
       return
@@ -1468,95 +1617,14 @@ export default function App() {
     runControllersRef.current.set(sessionId, aborter)
 
     try {
-      await consumeRunStream(text, baseUrl, (ev) => {
-        patchSession(sessionId, (s) => ({
-          ...s,
-          streamPrimed: true,
-          updatedAt: Date.now(),
-        }))
-        if (ev.type === "collapsible_init") {
-          patchSessionMessages(sessionId, (m) => [
-            ...m,
-            {
-              id: newId(),
-              role: "assistant",
-              collapsible: {
-                id: ev.group_id,
-                title: ev.title,
-                lines: [],
-              },
-            },
-          ])
-          return
-        }
-        if (ev.type === "collapsible_line") {
-          patchSessionMessages(sessionId, (m) =>
-            m.map((msg) => {
-              if (msg.collapsible?.id !== ev.group_id) return msg
-              return {
-                ...msg,
-                collapsible: {
-                  ...msg.collapsible,
-                  lines: [...msg.collapsible.lines, ev.line],
-                },
-              }
-            }),
-          )
-          return
-        }
-        if (ev.type === "text_block") {
-          const fmt =
-            ev.format === "markdown" || ev.format === "json"
-              ? "markdown"
-              : "plain"
-          patchSessionMessages(sessionId, (m) => [
-            ...m,
-            {
-              id: newId(),
-              role: "assistant",
-              text: ev.content,
-              textFormat: fmt,
-            },
-          ])
-          return
-        }
-        if (ev.type === "image_saved") {
-          const label = `P${Number(ev.sort).toString().padStart(2, "0")}`
-          const urls = imageUrlsFromSavedFiles([ev.saved_file], baseUrl)
-          patchSessionMessages(sessionId, (m) => [
-            ...m,
-            {
-              id: newId(),
-              role: "assistant",
-              text: `**${label}** ${ev.main}`,
-              textFormat: "markdown",
-              generatedImages: urls,
-            },
-          ])
-          return
-        }
-        if (ev.type === "complete") {
-          patchSession(sessionId, (s) => ({
-            ...s,
-            isRunning: false,
-            streamPrimed: false,
-            taskCompleted: true,
-            updatedAt: Date.now(),
-          }))
-          return
-        }
-        if (ev.type === "error") {
-          patchSessionMessages(sessionId, (m) => [
-            ...m,
-            {
-              id: newId(),
-              role: "assistant",
-              text: `執行失敗：${ev.detail}`,
-              error: true,
-            },
-          ])
-        }
-      }, aborter.signal, sessionId, resolveStyleProfileId(activeSession))
+      await consumeRunStream(
+        text,
+        baseUrl,
+        (ev) => applyEcommerceRunStreamEvent(sessionId, ev),
+        aborter.signal,
+        sessionId,
+        resolveStyleProfileId(activeSession),
+      )
     } catch (e) {
       if (e instanceof DOMException && e.name === "AbortError") {
         patchSessionMessages(sessionId, (m) => [
@@ -1616,12 +1684,107 @@ export default function App() {
     patchSession,
     patchSessionMessages,
     taskCompleted,
+    applyEcommerceRunStreamEvent,
   ])
 
-  const busy = activeStreaming || uploading
+  useEffect(() => {
+    if (!hydratedFromServer) return
+    const sid = activeId
+    const pend = pendingToolSessionRef.current
+    const sess =
+      pend && pend.id === sid && !pend.parentId
+        ? pend
+        : sessionsRef.current.find((s) => s.id === sid)
+    if (!sess || sess.toolId !== "ecommerce-image" || sess.parentId) return
+    if (sess.taskCompleted || sess.imageThreadLocked) return
+    if (runControllersRef.current.has(sid)) return
+
+    resumeRunGenRef.current += 1
+    const myGen = resumeRunGenRef.current
+
+    const aborter = new AbortController()
+    void (async () => {
+      let subscribed = false
+      try {
+        let st: Awaited<ReturnType<typeof fetchEcommerceRunStatus>> | null = null
+        try {
+          st = await fetchEcommerceRunStatus(sid, baseUrl, aborter.signal)
+        } catch (err) {
+          if (err instanceof DOMException && err.name === "AbortError") return
+          return
+        }
+        if (myGen !== resumeRunGenRef.current) return
+        if (aborter.signal.aborted) return
+        if (!st || st.status !== "running") return
+        if (runControllersRef.current.has(sid)) return
+
+        patchSession(sid, (s) => ({
+          ...s,
+          messages: trimMessagesAfterLastUser(s.messages),
+          isRunning: true,
+          streamPrimed: false,
+          updatedAt: Date.now(),
+        }))
+        if (myGen !== resumeRunGenRef.current) return
+        runControllersRef.current.set(sid, aborter)
+        subscribed = true
+        await consumeRunStreamSubscribe(sid, baseUrl, (ev) => {
+          applyEcommerceRunStreamEventRef.current(sid, ev)
+        }, aborter.signal)
+      } catch (e) {
+        if (myGen !== resumeRunGenRef.current) return
+        if (e instanceof DOMException && e.name === "AbortError") {
+          if (!subscribed) return
+          patchSessionMessages(sid, (m) => [
+            ...m,
+            { id: newId(), role: "assistant", text: "已停止目前流程。" },
+          ])
+          patchSession(sid, (s) => ({
+            ...s,
+            isRunning: false,
+            streamPrimed: false,
+            clearOnNextSend: true,
+            updatedAt: Date.now(),
+          }))
+          return
+        }
+        const msg = e instanceof Error ? e.message : String(e)
+        patchSessionMessages(sid, (m) => [
+          ...m,
+          {
+            id: newId(),
+            role: "assistant",
+            text: `執行失敗：${msg}`,
+            error: true,
+          },
+        ])
+      } finally {
+        if (subscribed) {
+          if (runControllersRef.current.get(sid) === aborter) {
+            runControllersRef.current.delete(sid)
+          }
+          if (myGen === resumeRunGenRef.current) {
+            patchSession(sid, (s) => ({
+              ...s,
+              isRunning: false,
+              streamPrimed: false,
+              updatedAt: Date.now(),
+            }))
+          }
+        }
+      }
+    })()
+    return () => {
+      resumeRunGenRef.current += 1
+      aborter.abort()
+    }
+  }, [hydratedFromServer, activeId, baseUrl, patchSession, patchSessionMessages])
+
+  const busy = streamUiActive || uploading
   const handleStop = useCallback(() => {
     runControllersRef.current.get(activeId)?.abort()
-  }, [activeId])
+    void cancelEcommerceRun(activeId, baseUrl).catch(() => {})
+  }, [activeId, baseUrl])
 
   const handleOpenImageThread = useCallback(
     async (imageUrl: string, bubbleTitle: string, sourceKey: string) => {
@@ -1881,8 +2044,8 @@ export default function App() {
                   persistScrollTopNow={persistMessagesScroll}
                   scrollFlushRef={messagesScrollFlushRef}
                   messages={messages}
-                  streaming={activeStreaming}
-                  streamPrimed={activeStreamPrimed}
+                  streaming={streamUiActive}
+                  streamPrimed={streamUiActive && activeStreamPrimed}
                   toolId={activeSession?.toolId}
                   imageThreadLocked={imageThreadLocked}
                   onOpenImageThread={
@@ -1902,7 +2065,7 @@ export default function App() {
                   onSend={handleSend}
                   onStop={handleStop}
                   disabled={busy}
-                  isStreaming={activeStreaming}
+                  isStreaming={streamUiActive}
                   taskCompleted={taskCompleted}
                   file={imageThreadLocked ? null : (inputAssetSessionId === activeId ? file : null)}
                   uploadedFileName={

@@ -6,6 +6,8 @@ import contextlib
 import json
 import os
 import re
+from collections.abc import AsyncIterator
+from typing import Any
 
 from fastapi import HTTPException
 from fastapi.responses import StreamingResponse
@@ -173,6 +175,40 @@ async def sse_streaming_response(generator_func, request) -> StreamingResponse:
                 task.cancel()
             with contextlib.suppress(asyncio.CancelledError):
                 await task
+
+    return StreamingResponse(
+        event_stream(),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "Connection": "keep-alive",
+            "X-Accel-Buffering": "no",
+        },
+    )
+
+
+async def sse_streaming_detached(
+    event_source: AsyncIterator[dict[str, Any]],
+    request,
+) -> StreamingResponse:
+    """
+    SSE 包裝：客戶端斷線時**不**取消 event_source 背後的背景任務。
+    event_source 須為 async iterator，逐筆 yield dict；terminal 為 type complete 或 error。
+    """
+
+    async def event_stream():
+        try:
+            async for item in event_source:
+                if await request.is_disconnected():
+                    break
+                yield f"data: {json.dumps(item, ensure_ascii=False)}\n\n"
+                if item.get("type") in ("complete", "error"):
+                    break
+        finally:
+            aclose = getattr(event_source, "aclose", None)
+            if aclose:
+                with contextlib.suppress(Exception):
+                    await aclose()
 
     return StreamingResponse(
         event_stream(),

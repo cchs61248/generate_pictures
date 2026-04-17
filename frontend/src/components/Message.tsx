@@ -1,4 +1,7 @@
-import type { ChatMessage } from "../api"
+import {
+  type ChatMessage,
+  normalizeImageUrlForCurrentApi,
+} from "../api"
 import Markdown from "react-markdown"
 import remarkGfm from "remark-gfm"
 
@@ -121,15 +124,17 @@ export function MessageBubble({ message, onOpenImageThread }: Props) {
               <p className="msg-generated-title">產生的圖片</p>
             ) : null}
             <div className="msg-generated-grid">
-              {message.generatedImages.map((url, idx) => (
-                <div key={url} className="msg-generated-card">
+              {message.generatedImages.map((url, idx) => {
+                const displayUrl = normalizeImageUrlForCurrentApi(url)
+                return (
+                <div key={`${url}::${idx}`} className="msg-generated-card">
                   <a
-                    href={url}
+                    href={displayUrl}
                     target="_blank"
                     rel="noreferrer"
                     className="msg-generated-link"
                   >
-                    <img src={url} alt="" className="msg-generated-img" />
+                    <img src={displayUrl} alt="" className="msg-generated-img" />
                   </a>
                   {onOpenImageThread ? (
                     <button
@@ -137,7 +142,7 @@ export function MessageBubble({ message, onOpenImageThread }: Props) {
                       className="msg-generated-thread-btn"
                       onClick={() =>
                         onOpenImageThread(
-                          url,
+                          displayUrl,
                           (message.text ?? "").trim(),
                           `${message.id}::${idx}`,
                         )
@@ -147,7 +152,8 @@ export function MessageBubble({ message, onOpenImageThread }: Props) {
                     </button>
                   ) : null}
                 </div>
-              ))}
+                )
+              })}
             </div>
           </div>
         ) : null}
