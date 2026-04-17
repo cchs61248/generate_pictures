@@ -37,6 +37,10 @@ _image_thread_registry_lock = asyncio.Lock()
 _disk_lock = threading.Lock()
 
 
+class ImageThreadCancelled(Exception):
+    """Image-thread 同步階段偵測到取消請求。"""
+
+
 def image_thread_job_json_path(root: str, sid: str) -> str:
     return os.path.join(root, "data", f"image_thread_job_{sid}.json")
 
@@ -156,10 +160,14 @@ def _image_thread_generate_sync(
     session_title: str,
     selected_style_profile_id: str | None,
     latest_image_abs: str,
+    cancel_event: threading.Event | None = None,
 ) -> tuple[str, str | None]:
     from google.genai import types as genai_types
     import google.genai as genai_new
     from PIL import Image
+
+    if cancel_event and cancel_event.is_set():
+        raise ImageThreadCancelled("run cancelled before start")
 
     sync_managed_env_from_dotenv(os.path.join(root, ".env"))
     api_key = os.environ.get("GOOGLE_API_KEY") or ""
@@ -209,6 +217,9 @@ def _image_thread_generate_sync(
         ),
     )
 
+    if cancel_event and cancel_event.is_set():
+        raise ImageThreadCancelled("run cancelled after model response")
+
     usage = getattr(response, "usage_metadata", None)
     if usage is not None:
         try:
@@ -231,6 +242,8 @@ def _image_thread_generate_sync(
 
     saved_filename: str | None = None
     if result_image_bytes:
+        if cancel_event and cancel_event.is_set():
+            raise ImageThreadCancelled("run cancelled before image save")
         picture_dir = os.path.join(root, "picture")
         os.makedirs(picture_dir, exist_ok=True)
         safe_title = safe_filename_part(session_title)
@@ -275,6 +288,8 @@ class ImageThreadJob:
         self._subscribers: set[asyncio.Queue] = set()
         self._job_lock = asyncio.Lock()
         self.task: asyncio.Task | None = None
+        self.cancel_event = threading.Event()
+        self.cancel_requested_at: float | None = None
 
     def matches_launch_params(
         self,
@@ -301,6 +316,8 @@ class ImageThreadJob:
             "started_user_text": self.user_text,
             "session_title": self.session_title,
             "selected_style_profile_id": self.selected_style_profile_id,
+            "cancel_requested": self.cancel_event.is_set(),
+            "cancel_requested_at": self.cancel_requested_at,
             "last_seq": self._next_seq - 1,
             "events": list(ev),
         }
@@ -384,6 +401,7 @@ class ImageThreadJob:
                     self.session_title,
                     self.selected_style_profile_id,
                     latest_image_abs,
+                    self.cancel_event,
                 )
 
                 current_entries = load_image_thread_history(self.root, self.sid)
@@ -429,6 +447,10 @@ class ImageThreadJob:
                 logger.warning("[image_thread_job] execute cancelled | sid=%s", self.sid)
                 await self.on_event({"type": "error", "detail": "已取消目前流程。"})
                 raise
+            except ImageThreadCancelled:
+                self.status = "cancelled"
+                logger.warning("[image_thread_job] execute cancelled (sync stage) | sid=%s", self.sid)
+                await self.on_event({"type": "error", "detail": "已取消目前流程。"})
             except Exception as exc:
                 self.status = "error"
                 logger.error("[image_thread_job] execute failed | sid=%s err=%s", self.sid, exc)
@@ -445,7 +467,16 @@ async def cancel_image_thread_run(root: str, sid: str) -> bool:
     if not job or not job.task or job.task.done():
         logger.info("[image_thread_job] cancel skipped | sid=%s", sid, extra=log_extra(sid, None))
         return False
-    logger.info("[image_thread_job] cancel requested | sid=%s", sid, extra=log_extra(sid, None))
+    now_ts = time.time()
+    job.cancel_requested_at = now_ts
+    job.cancel_event.set()
+    logger.info(
+        "[image_thread_job] cancel requested | sid=%s requested_at=%.3f",
+        sid,
+        now_ts,
+        extra=log_extra(sid, None),
+    )
+    await asyncio.to_thread(_persist_snapshot, root, sid, job._snapshot())
     job.task.cancel()
     try:
         await job.task
