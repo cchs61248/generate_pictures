@@ -32,6 +32,10 @@ _ALLOWED_DOC_EXTS = {".txt", ".pdf", ".docx", ".doc", ".md"}
 from api.routers.tools.ecommerce_image.image_thread.service import (
     delete_image_thread_history,
 )
+from api.routers.tools.ecommerce_image.image_thread.image_thread_job import (
+    cancel_image_thread_run,
+    delete_image_thread_job_file,
+)
 from api.routers.tools.ecommerce_image.services.run_job import (
     cancel_ecommerce_run,
     delete_run_job_file,
@@ -111,6 +115,8 @@ async def delete_session_upload(session_id: str):
 
     await cancel_ecommerce_run(root, sid)
     delete_run_job_file(root, sid)
+    await cancel_image_thread_run(root, sid)
+    delete_image_thread_job_file(root, sid)
 
     upload_path = os.path.join(root, "uploads", f"{sid}.jpg")
     json_path = os.path.join(root, "template_json", f"final_output_{sid}.json")

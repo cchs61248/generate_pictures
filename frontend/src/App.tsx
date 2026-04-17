@@ -10,7 +10,9 @@ import { flushSync } from "react-dom"
 import {
   type ChatMessage,
   cancelEcommerceRun,
+  cancelImageThreadRun,
   consumeImageThreadStream,
+  consumeImageThreadStreamSubscribe,
   consumeRunStream,
   consumeRunStreamSubscribe,
   deleteSessionDocument,
@@ -18,12 +20,14 @@ import {
   deleteSessionUpload,
   deleteSessionUploadImage,
   fetchEcommerceRunStatus,
+  fetchImageThreadRunStatus,
   fetchSessionState,
   getApiBaseUrl,
   imageUrlsFromSavedFiles,
   initImageThread,
   saveSessionState,
   fetchStyleLearningStatus,
+  type ImageThreadStreamEvent,
   type SseEventMeta,
   type StreamEvent,
   type StyleProfile,
@@ -1305,6 +1309,68 @@ export default function App() {
     [activeId, baseUrl, docUploads, patchActiveSession],
   )
 
+  const applyImageThreadStreamEvent = useCallback(
+    (sessionId: string, ev: ImageThreadStreamEvent, meta?: SseEventMeta) => {
+      patchSession(sessionId, (s) => ({
+        ...s,
+        streamPrimed: true,
+        lastRunEventSeq:
+          meta?.eventId && meta.eventId > 0
+            ? meta.eventId
+            : (s.lastRunEventSeq ?? 0),
+        updatedAt: Date.now(),
+      }))
+      if (ev.type === "progress") {
+        return
+      }
+      if (ev.type === "complete") {
+        const replyText = ev.text?.trim() || ""
+        const base = baseUrl.replace(/\/+$/, "")
+        const imageUrls = ev.saved_image
+          ? [`${base}/images/${encodeURIComponent(ev.saved_image)}`]
+          : []
+        patchSessionMessages(sessionId, (m) => [
+          ...m,
+          {
+            id: newId(),
+            role: "assistant",
+            text: replyText || (imageUrls.length ? "已完成圖片修改。" : "已處理完畢。"),
+            textFormat: "plain" as const,
+            generatedImages: imageUrls.length ? imageUrls : undefined,
+          },
+        ])
+        patchSession(sessionId, (s) => ({
+          ...s,
+          isRunning: false,
+          streamPrimed: false,
+          updatedAt: Date.now(),
+        }))
+        return
+      }
+      if (ev.type === "error") {
+        patchSessionMessages(sessionId, (m) => [
+          ...m,
+          {
+            id: newId(),
+            role: "assistant",
+            text: `執行失敗：${ev.detail}`,
+            error: true,
+          },
+        ])
+        patchSession(sessionId, (s) => ({
+          ...s,
+          isRunning: false,
+          streamPrimed: false,
+          updatedAt: Date.now(),
+        }))
+      }
+    },
+    [baseUrl, patchSession, patchSessionMessages],
+  )
+
+  const applyImageThreadStreamEventRef = useRef(applyImageThreadStreamEvent)
+  applyImageThreadStreamEventRef.current = applyImageThreadStreamEvent
+
   const applyEcommerceRunStreamEvent = useCallback(
     (sessionId: string, ev: StreamEvent, meta?: SseEventMeta) => {
       patchSession(sessionId, (s) => ({
@@ -1442,14 +1508,14 @@ export default function App() {
 
       const sessionId = activeId
       const selectedStyleProfileId = resolveStyleProfileId(activeSession)
+      const aborter = new AbortController()
+      runControllersRef.current.set(sessionId, aborter)
       patchSession(sessionId, (s) => ({
         ...s,
         isRunning: true,
-        streamPrimed: true,
+        streamPrimed: false,
         updatedAt: Date.now(),
       }))
-      const aborter = new AbortController()
-      runControllersRef.current.set(sessionId, aborter)
 
       const sessionTitle = activeSession?.title ?? "thread"
       try {
@@ -1459,52 +1525,8 @@ export default function App() {
           sessionTitle,
           selectedStyleProfileId,
           baseUrl,
-          (ev) => {
-            if (ev.type === "progress") {
-              // 進度提示，不加入訊息列表
-              return
-            }
-            if (ev.type === "complete") {
-              const replyText = ev.text?.trim() || ""
-              const base = baseUrl.replace(/\/+$/, "")
-              const imageUrls = ev.saved_image
-                ? [`${base}/images/${encodeURIComponent(ev.saved_image)}`]
-                : []
-              patchSessionMessages(sessionId, (m) => [
-                ...m,
-                {
-                  id: newId(),
-                  role: "assistant",
-                  text: replyText || (imageUrls.length ? "已完成圖片修改。" : "已處理完畢。"),
-                  textFormat: "plain" as const,
-                  generatedImages: imageUrls.length ? imageUrls : undefined,
-                },
-              ])
-              patchSession(sessionId, (s) => ({
-                ...s,
-                isRunning: false,
-                streamPrimed: false,
-                updatedAt: Date.now(),
-              }))
-              return
-            }
-            if (ev.type === "error") {
-              patchSessionMessages(sessionId, (m) => [
-                ...m,
-                {
-                  id: newId(),
-                  role: "assistant",
-                  text: `執行失敗：${ev.detail}`,
-                  error: true,
-                },
-              ])
-              patchSession(sessionId, (s) => ({
-                ...s,
-                isRunning: false,
-                streamPrimed: false,
-                updatedAt: Date.now(),
-              }))
-            }
+          (ev, meta) => {
+            applyImageThreadStreamEventRef.current(sessionId, ev, meta)
           },
           aborter.signal,
         )
@@ -1718,8 +1740,8 @@ export default function App() {
       pend && pend.id === sid && !pend.parentId
         ? pend
         : sessionsRef.current.find((s) => s.id === sid)
-    if (!sess || sess.toolId !== "ecommerce-image" || sess.parentId) return
-    if (sess.taskCompleted || sess.imageThreadLocked) return
+    if (!sess || sess.toolId !== "ecommerce-image") return
+    if (sess.taskCompleted) return
     if (runControllersRef.current.has(sid)) return
 
     resumeRunGenRef.current += 1
@@ -1729,16 +1751,25 @@ export default function App() {
     void (async () => {
       let subscribed = false
       try {
+        const isImageThread = Boolean(sess.parentId || sess.imageThreadLocked)
         let st: Awaited<ReturnType<typeof fetchEcommerceRunStatus>> | null = null
+        let stImg: Awaited<ReturnType<typeof fetchImageThreadRunStatus>> | null = null
         try {
-          st = await fetchEcommerceRunStatus(sid, baseUrl, aborter.signal)
+          if (isImageThread) {
+            stImg = await fetchImageThreadRunStatus(sid, baseUrl, aborter.signal)
+          } else {
+            st = await fetchEcommerceRunStatus(sid, baseUrl, aborter.signal)
+          }
         } catch (err) {
           if (err instanceof DOMException && err.name === "AbortError") return
           return
         }
         if (myGen !== resumeRunGenRef.current) return
         if (aborter.signal.aborted) return
-        if (!st || st.status !== "running") {
+        const running = isImageThread
+          ? Boolean(stImg && stImg.status === "running")
+          : Boolean(st && st.status === "running")
+        if (!running) {
           patchSession(sid, (s) =>
             s.isRunning || s.streamPrimed
               ? {
@@ -1755,7 +1786,7 @@ export default function App() {
 
         patchSession(sid, (s) => ({
           ...s,
-          // 重連時以「最後一則 user 之後整段重建」為準，避免工具/系統泡泡因游標落差被跳過
+          // 重連時以「最後一則 user 之後整段重建」為準，避免工具/系統泡泡因遊標落差被跳過
           messages: trimMessagesAfterLastUser(s.messages),
           isRunning: true,
           streamPrimed: false,
@@ -1765,15 +1796,27 @@ export default function App() {
         if (myGen !== resumeRunGenRef.current) return
         runControllersRef.current.set(sid, aborter)
         subscribed = true
-        await consumeRunStreamSubscribe(
-          sid,
-          baseUrl,
-          (ev, meta) => {
-            applyEcommerceRunStreamEventRef.current(sid, ev, meta)
-          },
-          aborter.signal,
-          0,
-        )
+        if (isImageThread) {
+          await consumeImageThreadStreamSubscribe(
+            sid,
+            baseUrl,
+            (ev, meta) => {
+              applyImageThreadStreamEventRef.current(sid, ev, meta)
+            },
+            aborter.signal,
+            0,
+          )
+        } else {
+          await consumeRunStreamSubscribe(
+            sid,
+            baseUrl,
+            (ev, meta) => {
+              applyEcommerceRunStreamEventRef.current(sid, ev, meta)
+            },
+            aborter.signal,
+            0,
+          )
+        }
       } catch (e) {
         if (myGen !== resumeRunGenRef.current) return
         if (e instanceof DOMException && e.name === "AbortError") {
@@ -1825,9 +1868,35 @@ export default function App() {
 
   const busy = streamUiActive || uploading
   const handleStop = useCallback(() => {
-    runControllersRef.current.get(activeId)?.abort()
-    void cancelEcommerceRun(activeId, baseUrl).catch(() => {})
-  }, [activeId, baseUrl])
+    const sid = activeId
+    runControllersRef.current.get(sid)?.abort()
+    const isImageThread = Boolean(
+      activeSession?.parentId || activeSession?.imageThreadLocked,
+    )
+    if (isImageThread) {
+      void cancelImageThreadRun(sid, baseUrl).catch(() => {})
+      if (!runControllersRef.current.has(sid)) {
+        patchSession(sid, (s) =>
+          s.isRunning || s.streamPrimed
+            ? {
+                ...s,
+                isRunning: false,
+                streamPrimed: false,
+                updatedAt: Date.now(),
+              }
+            : s,
+        )
+      }
+      return
+    }
+    void cancelEcommerceRun(sid, baseUrl).catch(() => {})
+  }, [
+    activeId,
+    activeSession?.imageThreadLocked,
+    activeSession?.parentId,
+    baseUrl,
+    patchSession,
+  ])
 
   const handleOpenImageThread = useCallback(
     async (imageUrl: string, bubbleTitle: string, sourceKey: string) => {

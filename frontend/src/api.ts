@@ -370,7 +370,7 @@ export async function consumeImageThreadStream(
   sessionTitle: string,
   selectedStyleProfileId: string,
   baseUrl: string,
-  onEvent: (event: ImageThreadStreamEvent) => void,
+  onEvent: (event: ImageThreadStreamEvent, meta?: SseEventMeta) => void,
   signal?: AbortSignal,
 ): Promise<void> {
   logFrontend(baseUrl, "info", "consumeImageThreadStream started", {
@@ -404,11 +404,18 @@ export async function consumeImageThreadStream(
   const decoder = new TextDecoder()
   let buffer = ""
   const dispatchSseBlock = (block: string) => {
-    const trimmed = block.trim()
-    if (!trimmed.startsWith("data:")) return
-    const jsonStr = trimmed.slice(5).trimStart()
+    const lines = block
+      .split("\n")
+      .map((line) => line.trim())
+      .filter(Boolean)
+    const dataLine = lines.find((line) => line.startsWith("data:"))
+    if (!dataLine) return
+    const jsonStr = dataLine.slice(5).trimStart()
+    const idLine = lines.find((line) => line.startsWith("id:"))
+    const idRaw = idLine ? Number.parseInt(idLine.slice(3).trim(), 10) : NaN
+    const eventId = Number.isFinite(idRaw) && idRaw > 0 ? idRaw : undefined
     try {
-      onEvent(JSON.parse(jsonStr) as ImageThreadStreamEvent)
+      onEvent(JSON.parse(jsonStr) as ImageThreadStreamEvent, { eventId })
     } catch (err) {
       logFrontend(baseUrl, "warning", "consumeImageThreadStream parse failed", {
         sessionId,
@@ -435,6 +442,118 @@ export async function consumeImageThreadStream(
     }
   }
   logFrontend(baseUrl, "info", "consumeImageThreadStream completed", { sessionId })
+}
+
+export type ImageThreadRunStatusResponse = {
+  status: string
+  session_id?: string
+  has_active_task?: boolean
+  event_count?: number
+}
+
+/** GET /chat/image-thread/status */
+export async function fetchImageThreadRunStatus(
+  sessionId: string,
+  baseUrl: string,
+  signal?: AbortSignal,
+): Promise<ImageThreadRunStatusResponse> {
+  const res = await fetch(
+    `${trimSlash(baseUrl)}/chat/image-thread/status?session_id=${encodeURIComponent(sessionId)}`,
+    { signal },
+  )
+  if (!res.ok) {
+    const body = await safeJson(res)
+    const detail = extractDetail(body)
+    throw new Error(detail || `查詢圖片討論串狀態失敗 (${res.status})`)
+  }
+  return (await res.json()) as ImageThreadRunStatusResponse
+}
+
+/** POST /chat/image-thread/cancel */
+export async function cancelImageThreadRun(
+  sessionId: string,
+  baseUrl: string,
+): Promise<{ ok: boolean; cancelled: boolean }> {
+  const res = await fetch(`${trimSlash(baseUrl)}/chat/image-thread/cancel`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ session_id: sessionId }),
+  })
+  if (!res.ok) {
+    const body = await safeJson(res)
+    const detail = extractDetail(body)
+    throw new Error(detail || `取消圖片討論串任務失敗 (${res.status})`)
+  }
+  return (await res.json()) as { ok: boolean; cancelled: boolean }
+}
+
+/** GET /chat/image-thread/subscribe — 重新整理後接續同一任務的 SSE */
+export async function consumeImageThreadStreamSubscribe(
+  sessionId: string,
+  baseUrl: string,
+  onEvent: (event: ImageThreadStreamEvent, meta?: SseEventMeta) => void,
+  signal?: AbortSignal,
+  fromSeq = 0,
+): Promise<void> {
+  logFrontend(baseUrl, "info", "consumeImageThreadStreamSubscribe started", { sessionId })
+  const res = await fetch(
+    `${trimSlash(baseUrl)}/chat/image-thread/subscribe?session_id=${encodeURIComponent(sessionId)}&from_seq=${encodeURIComponent(String(Math.max(0, Math.trunc(fromSeq))))}`,
+    { signal },
+  )
+  if (!res.ok) {
+    const body = await safeJson(res)
+    const detail = extractDetail(body)
+    logFrontend(baseUrl, "error", "consumeImageThreadStreamSubscribe request failed", {
+      status: res.status,
+      detail,
+      sessionId,
+    })
+    throw new Error(detail || `訂閱圖片討論串流失敗 (${res.status})`)
+  }
+  const reader = res.body?.getReader()
+  if (!reader) {
+    throw new Error("無法讀取回應本文")
+  }
+  const decoder = new TextDecoder()
+  let buffer = ""
+  const dispatchSseBlock = (block: string) => {
+    const lines = block
+      .split("\n")
+      .map((line) => line.trim())
+      .filter(Boolean)
+    const dataLine = lines.find((line) => line.startsWith("data:"))
+    if (!dataLine) return
+    const jsonStr = dataLine.slice(5).trimStart()
+    const idLine = lines.find((line) => line.startsWith("id:"))
+    const idRaw = idLine ? Number.parseInt(idLine.slice(3).trim(), 10) : NaN
+    const eventId = Number.isFinite(idRaw) && idRaw > 0 ? idRaw : undefined
+    try {
+      onEvent(JSON.parse(jsonStr) as ImageThreadStreamEvent, { eventId })
+    } catch (err) {
+      logFrontend(baseUrl, "warning", "consumeImageThreadStreamSubscribe parse failed", {
+        sessionId,
+        error: String(err),
+      })
+    }
+  }
+  while (true) {
+    const { done, value } = await reader.read()
+    if (value) buffer += decoder.decode(value, { stream: true })
+    const segments = buffer.split("\n\n")
+    buffer = segments.pop() ?? ""
+    for (const seg of segments) {
+      dispatchSseBlock(seg)
+    }
+    if (done) break
+  }
+  logFrontend(baseUrl, "info", "consumeImageThreadStreamSubscribe completed", { sessionId })
+  const tail = buffer.trim()
+  if (tail) {
+    for (const line of tail.split("\n")) {
+      const t = line.trim()
+      if (t) dispatchSseBlock(t)
+    }
+  }
 }
 
 export async function runGeneration(

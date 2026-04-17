@@ -154,7 +154,7 @@ export function loadPersistedState(): PersistedState | null {
     // backward compat: older builds lacked these fields
     data.sessions = data.sessions.map((s) => ({
       ...s,
-      // full reload: keep isRunning only for activeId so /run/status can reconcile
+      // full reload: keep isRunning for active session only (ecommerce / image-thread both use /status + subscribe).
       isRunning:
         s.id === activeId
           ? Boolean((s as Partial<ChatSession>).isRunning)
