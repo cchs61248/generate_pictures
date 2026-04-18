@@ -1,4 +1,3 @@
-import asyncio
 import re
 import time
 
@@ -89,42 +88,5 @@ def generate_image_with_retry(
                     max_retries,
                 )
                 time.sleep(wait_sec)
-            else:
-                raise
-
-
-async def generate_image_webapi(
-    gemini_client,
-    image_prompt: str,
-    image_path: str,
-    selected_style_profile_id: str | None = None,
-    max_retries: int = 5,
-) -> list:
-    final_prompt = f"""請幫我生成一張電商商品圖片，圖片大小1000*1000，請參考我上傳的商品圖片外觀，依照以下設計要求生成：
-
-{resolve_picture_style_template(selected_style_profile_id=selected_style_profile_id)}
-
-{image_prompt}
-"""
-    logger.info("[image_gen] generate with webapi path start")
-    for attempt in range(max_retries + 1):
-        try:
-            response = await gemini_client.generate_content(
-                final_prompt,
-                model="gemini-3-flash-thinking",
-                files=[image_path],
-            )
-            return response.images if response.images else []
-        except Exception as exc:
-            err_str = str(exc)
-            if is_transient_google_api_error(err_str) and attempt < max_retries:
-                wait_sec = retry_wait_seconds_for_google(err_str)
-                logger.warning(
-                    "Web API 產圖暫時性錯誤，等待 %s 秒後重試（第 %s/%s 次）",
-                    wait_sec,
-                    attempt + 1,
-                    max_retries,
-                )
-                await asyncio.sleep(wait_sec)
             else:
                 raise

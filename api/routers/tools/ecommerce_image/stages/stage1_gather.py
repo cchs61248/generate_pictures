@@ -63,10 +63,7 @@ def _response_text_safe(response) -> str:
 async def gather_product_info(
     user_input: str,
     image,
-    image_path: str,
     genai_client,
-    gemini_client,
-    use_webapi: bool,
     doc_texts: list[str] | None = None,
     doc_filenames: list[str] | None = None,
     progress: ProgressBus | None = None,
@@ -74,10 +71,8 @@ async def gather_product_info(
 ) -> str:
     logger.info("[stage1] enter gather_product_info")
     logger.debug(
-        "[stage1] args | use_webapi=%s doc_count=%d has_image_path=%s selected_style_profile_id=%s",
-        use_webapi,
+        "[stage1] args | doc_count=%d selected_style_profile_id=%s",
         len(doc_texts or []),
-        bool(image_path),
         selected_style_profile_id or "(default)",
     )
     ctx_token = None
@@ -216,51 +211,42 @@ async def gather_product_info(
     logger.debug("[stage1] prompt preview: %s", _preview_text(info_prompt, 600))
 
     try:
-        if use_webapi:
-            logger.info("[stage1] calling Gemini Web API")
-            response = await gemini_client.generate_content(
-                stage1_system_instruction + "\n\n" + info_prompt,
-                model="gemini-3-flash-thinking",
-                files=[image_path],
-            )
-            gathered_info = _response_text_safe(response)
-        else:
-            logger.info("[stage1] calling Gemini API-key chat tools flow")
-            bounded_search = make_bounded_search_web()
-            info_chat = genai_client.chats.create(
-                model=get_text_model(),
-                config=types.GenerateContentConfig(
-                    tools=[bounded_search, fetch_webpage],
-                    system_instruction=stage1_system_instruction,
-                    automatic_function_calling=types.AutomaticFunctionCallingConfig(
-                        disable=False,
-                        # 搜尋最多 get_max_llm_search_calls() 次（見 make_bounded_search_web）；其餘額度給 fetch_webpage
-                        maximum_remote_calls=get_max_llm_search_calls() + 2,
-                    ),
+        logger.info("[stage1] calling Gemini API chat tools flow")
+        bounded_search = make_bounded_search_web()
+        info_chat = genai_client.chats.create(
+            model=get_text_model(),
+            config=types.GenerateContentConfig(
+                tools=[bounded_search, fetch_webpage],
+                system_instruction=stage1_system_instruction,
+                automatic_function_calling=types.AutomaticFunctionCallingConfig(
+                    disable=False,
+                    # 搜尋最多 get_max_llm_search_calls() 次（見 make_bounded_search_web）；其餘額度給 fetch_webpage
+                    maximum_remote_calls=get_max_llm_search_calls() + 2,
                 ),
+            ),
+        )
+        # send_message 為同步長時間呼叫，須移出事件迴圈以免 SSE 進度無法即時推送
+        response = await asyncio.to_thread(
+            info_chat.send_message,
+            [info_prompt, image],
+        )
+        usage = getattr(response, "usage_metadata", None)
+        if usage is not None:
+            logger.debug(
+                "[stage1] usage_metadata | prompt_tokens=%s output_tokens=%s",
+                getattr(usage, "prompt_token_count", 0) or 0,
+                getattr(usage, "candidates_token_count", 0) or 0,
             )
-            # send_message 為同步長時間呼叫，須移出事件迴圈以免 SSE 進度無法即時推送
-            response = await asyncio.to_thread(
-                info_chat.send_message,
-                [info_prompt, image],
-            )
-            usage = getattr(response, "usage_metadata", None)
-            if usage is not None:
-                logger.debug(
-                    "[stage1] usage_metadata | prompt_tokens=%s output_tokens=%s",
-                    getattr(usage, "prompt_token_count", 0) or 0,
-                    getattr(usage, "candidates_token_count", 0) or 0,
+            try:
+                log_token_usage(
+                    model=get_text_model(),
+                    source="stage1_gather",
+                    input_tokens=getattr(usage, "prompt_token_count", 0) or 0,
+                    output_tokens=getattr(usage, "candidates_token_count", 0) or 0,
                 )
-                try:
-                    log_token_usage(
-                        model=get_text_model(),
-                        source="stage1_gather",
-                        input_tokens=getattr(usage, "prompt_token_count", 0) or 0,
-                        output_tokens=getattr(usage, "candidates_token_count", 0) or 0,
-                    )
-                except Exception:
-                    pass
-            gathered_info = _response_text_safe(response)
+            except Exception:
+                pass
+        gathered_info = _response_text_safe(response)
 
         logger.info("[stage1] completed gather_product_info | output_chars=%d", len(gathered_info))
         logger.debug("[stage1] gathered info preview: %s", _preview_text(gathered_info, 800))

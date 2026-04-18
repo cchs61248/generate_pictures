@@ -248,8 +248,6 @@ export async function fetchSessionState(
 /** 與 core/config.py 的 ENV_VARS_HIDDEN_FROM_SETTINGS_UI 對齊；設定頁不顯示這些鍵。 */
 export const ENV_KEYS_HIDDEN_FROM_SETTINGS_UI = new Set([
   "STAGE3_ONLY_MODE",
-  "GEMINI_COOKIE_1PSID",
-  "GEMINI_COOKIE_1PSIDTS",
 ])
 
 export type EnvVariableRow = {

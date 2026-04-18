@@ -21,7 +21,6 @@ from api.routers.tools.ecommerce_image.services.style_learning import get_style_
 from api.routers.tools.ecommerce_image.utils.json_utils import (
     extract_json_candidate,
     repair_to_json_apikey,
-    repair_to_json_webapi,
     validate_output,
 )
 
@@ -68,18 +67,14 @@ def _format_final_data_markdown(final_data: list[dict]) -> str:
 async def generate_json_plan(
     gathered_info: str,
     image,
-    image_path: str,
     genai_client,
-    gemini_client,
-    use_webapi: bool,
     output_json_path: str,
     progress: ProgressBus | None = None,
     selected_style_profile_id: str | None = None,
 ) -> list[dict]:
     logger.info("[stage2] enter generate_json_plan")
     logger.debug(
-        "[stage2] args | use_webapi=%s output_json_path=%s selected_style_profile_id=%s gathered_info_chars=%d",
-        use_webapi,
+        "[stage2] args | output_json_path=%s selected_style_profile_id=%s gathered_info_chars=%d",
         output_json_path,
         selected_style_profile_id or "(default)",
         len(gathered_info or ""),
@@ -126,49 +121,39 @@ async def generate_json_plan(
         len(format_prompt),
     )
     logger.debug("[stage2] prompt preview: %s", _preview_text(format_prompt, 600))
-    if not use_webapi:
-        logger.debug(
-            "[stage2] system instruction preview: %s",
-            _preview_text(stage2_system_instruction, 600),
-        )
+    logger.debug(
+        "[stage2] system instruction preview: %s",
+        _preview_text(stage2_system_instruction, 600),
+    )
 
-    if use_webapi:
-        logger.info("[stage2] calling Gemini Web API")
-        response = await gemini_client.generate_content(
-            format_prompt + "\n\n" + stage2_system_instruction,
-            model="gemini-3-flash-thinking",
-            files=[image_path],
+    logger.info("[stage2] calling Gemini API model.generate_content")
+    response = await asyncio.to_thread(
+        genai_client.models.generate_content,
+        model=get_text_model(),
+        contents=[format_prompt, image],
+        config=types.GenerateContentConfig(
+            system_instruction=stage2_system_instruction,
+            temperature=0.0,
+            response_mime_type="application/json",
+        ),
+    )
+    usage = getattr(response, "usage_metadata", None)
+    if usage is not None:
+        logger.debug(
+            "[stage2] usage_metadata | prompt_tokens=%s output_tokens=%s",
+            getattr(usage, "prompt_token_count", 0) or 0,
+            getattr(usage, "candidates_token_count", 0) or 0,
         )
-        raw_output = response.text or ""
-    else:
-        logger.info("[stage2] calling Gemini API-key model.generate_content")
-        response = await asyncio.to_thread(
-            genai_client.models.generate_content,
-            model=get_text_model(),
-            contents=[format_prompt, image],
-            config=types.GenerateContentConfig(
-                system_instruction=stage2_system_instruction,
-                temperature=0.0,
-                response_mime_type="application/json",
-            ),
-        )
-        usage = getattr(response, "usage_metadata", None)
-        if usage is not None:
-            logger.debug(
-                "[stage2] usage_metadata | prompt_tokens=%s output_tokens=%s",
-                getattr(usage, "prompt_token_count", 0) or 0,
-                getattr(usage, "candidates_token_count", 0) or 0,
+        try:
+            log_token_usage(
+                model=get_text_model(),
+                source="stage2_json",
+                input_tokens=getattr(usage, "prompt_token_count", 0) or 0,
+                output_tokens=getattr(usage, "candidates_token_count", 0) or 0,
             )
-            try:
-                log_token_usage(
-                    model=get_text_model(),
-                    source="stage2_json",
-                    input_tokens=getattr(usage, "prompt_token_count", 0) or 0,
-                    output_tokens=getattr(usage, "candidates_token_count", 0) or 0,
-                )
-            except Exception:
-                pass
-        raw_output = response.text or ""
+        except Exception:
+            pass
+    raw_output = response.text or ""
     logger.info("[stage2] received model response | raw_chars=%d", len(raw_output))
     logger.debug("[stage2] raw output preview: %s", _preview_text(raw_output, 800))
 
@@ -213,14 +198,10 @@ async def generate_json_plan(
                     "line": line,
                 }
             )
-        if use_webapi:
-            logger.info("[stage2] repair path | webapi")
-            repaired = await repair_to_json_webapi(gemini_client, raw_output)
-        else:
-            logger.info("[stage2] repair path | api_key")
-            repaired = await asyncio.to_thread(
-                repair_to_json_apikey, genai_client, raw_output
-            )
+        logger.info("[stage2] repair path | api_key")
+        repaired = await asyncio.to_thread(
+            repair_to_json_apikey, genai_client, raw_output
+        )
         ok, reason = validate_output(repaired)
         if not ok:
             raise ValueError(f"修復後仍不符合 JSON 規範：{reason}")

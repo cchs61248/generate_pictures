@@ -14,7 +14,7 @@ from core.app_logging import get_backend_logger
 from core.config import get_image_model
 from core.progress import ProgressBus
 from core.token_logger import log_token_usage
-from services.image_gen import generate_image_with_retry, generate_image_webapi
+from services.image_gen import generate_image_with_retry
 
 from api.routers.tools.ecommerce_image.services.image_process import build_safe_name, compose_image_prompt
 
@@ -28,41 +28,11 @@ def _preview_text(text: str, limit: int = 280) -> str:
     return compact[:limit] + "...(truncated)"
 
 
-def _extract_pil_image(generated_image) -> Image.Image | None:
-    if isinstance(generated_image, Image.Image):
-        return generated_image
-
-    for attr in ("image", "pil_image", "_pil_image"):
-        value = getattr(generated_image, attr, None)
-        if isinstance(value, Image.Image):
-            return value
-
-    for attr in ("data", "bytes", "image_bytes", "_image_bytes"):
-        value = getattr(generated_image, attr, None)
-        if isinstance(value, (bytes, bytearray)) and value:
-            image = Image.open(io.BytesIO(value))
-            image.load()
-            return image
-
-    for method_name in ("to_pil", "as_pil"):
-        method = getattr(generated_image, method_name, None)
-        if callable(method):
-            value = method()
-            if isinstance(value, Image.Image):
-                return value
-
-    return None
-
-
 async def generate_all_images(
     final_data: list[dict],
     image,
-    image_path: str,
     picture_dir: str,
     genai_client,
-    gemini_client,
-    use_webapi: bool,
-    use_hybrid: bool,
     session_id: str = "",
     progress: ProgressBus | None = None,
     selected_style_profile_id: str | None = None,
@@ -70,10 +40,8 @@ async def generate_all_images(
     logger.info("[stage3] enter generate_all_images")
     logger.info("[stage3] 開始批次產圖")
     logger.debug(
-        "[stage3] args | items=%d use_webapi=%s use_hybrid=%s picture_dir=%s session_id=%s selected_style_profile_id=%s",
+        "[stage3] args | items=%d picture_dir=%s session_id=%s selected_style_profile_id=%s",
         len(final_data or []),
-        use_webapi,
-        use_hybrid,
         picture_dir,
         session_id or "(none)",
         selected_style_profile_id or "(default)",
@@ -81,11 +49,11 @@ async def generate_all_images(
     os.makedirs(picture_dir, exist_ok=True)
 
     saved_files: list[str] = []
-    # cnt = 0
+    cnt = 0
     for item in final_data:
-        # cnt += 1
-        # if cnt >= 5:
-        #     break
+        cnt += 1
+        if cnt >= 3:
+            break
         sort_num = item["sort"]
         main_name = item["main"].replace('Prompt', '')
         image_prompt = compose_image_prompt(item)
@@ -113,65 +81,36 @@ async def generate_all_images(
 
         try:
             raw_image = None
-            if use_webapi or use_hybrid:
-                logger.debug("[stage3] P%02d image generation path=webapi", sort_num)
-                generated_images = await generate_image_webapi(
-                    gemini_client,
-                    image_prompt,
-                    image_path,
-                    selected_style_profile_id=selected_style_profile_id,
+            logger.debug("[stage3] P%02d image generation path=api_key", sort_num)
+            response = await asyncio.to_thread(
+                generate_image_with_retry,
+                genai_client,
+                image_prompt,
+                image,
+                selected_style_profile_id,
+            )
+            usage = getattr(response, "usage_metadata", None)
+            if usage is not None:
+                logger.debug(
+                    "[stage3] P%02d usage_metadata | prompt_tokens=%s output_tokens=%s",
+                    sort_num,
+                    getattr(usage, "prompt_token_count", 0) or 0,
+                    getattr(usage, "candidates_token_count", 0) or 0,
                 )
-                if not generated_images:
-                    w = f"  ⚠️  P{sort_num:02d} Web API 產圖未取得圖片（Gemini 未生成圖片），跳過。"
-                    logger.warning(w)
-                    if progress:
-                        await progress.emit(
-                            {
-                                "type": "collapsible_line",
-                                "group_id": group_id,
-                                "line": w.strip(),
-                            }
-                        )
-                    continue
-                generated_image = generated_images[0]
-                raw_image = _extract_pil_image(generated_image)
-                if raw_image is None:
-                    attrs = [name for name in dir(generated_image) if not name.startswith("_")]
-                    preview = ", ".join(attrs[:20]) if attrs else "(無可見屬性)"
-                    raise ValueError(
-                        f"Web API 產圖格式不支援，型別={type(generated_image).__name__}，可見屬性: {preview}"
+                try:
+                    log_token_usage(
+                        model=get_image_model(),
+                        source="stage3_image",
+                        input_tokens=getattr(usage, "prompt_token_count", 0) or 0,
+                        output_tokens=getattr(usage, "candidates_token_count", 0) or 0,
                     )
-            else:
-                logger.debug("[stage3] P%02d image generation path=api_key", sort_num)
-                response = await asyncio.to_thread(
-                    generate_image_with_retry,
-                    genai_client,
-                    image_prompt,
-                    image,
-                    selected_style_profile_id,
-                )
-                usage = getattr(response, "usage_metadata", None)
-                if usage is not None:
-                    logger.debug(
-                        "[stage3] P%02d usage_metadata | prompt_tokens=%s output_tokens=%s",
-                        sort_num,
-                        getattr(usage, "prompt_token_count", 0) or 0,
-                        getattr(usage, "candidates_token_count", 0) or 0,
-                    )
-                    try:
-                        log_token_usage(
-                            model=get_image_model(),
-                            source="stage3_image",
-                            input_tokens=getattr(usage, "prompt_token_count", 0) or 0,
-                            output_tokens=getattr(usage, "candidates_token_count", 0) or 0,
-                        )
-                    except Exception:
-                        pass
-                for part in response.parts:
-                    if part.inline_data is not None:
-                        raw_image = Image.open(io.BytesIO(part.inline_data.data))
-                        raw_image.load()
-                        break
+                except Exception:
+                    pass
+            for part in response.parts:
+                if part.inline_data is not None:
+                    raw_image = Image.open(io.BytesIO(part.inline_data.data))
+                    raw_image.load()
+                    break
 
             if raw_image is None:
                 w = f"  ⚠️  P{sort_num:02d} 未取得圖片內容，跳過。"

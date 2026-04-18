@@ -33,10 +33,8 @@ async def run_pipeline(
     selected_style_profile_id: str | None = None,
 ) -> dict:
     logger.info(
-        "[pipeline] start run_pipeline | stage3_only=%s use_webapi=%s use_hybrid=%s session_id=%s",
+        "[pipeline] start run_pipeline | stage3_only=%s session_id=%s",
         config.stage3_only_mode,
-        config.use_webapi,
-        config.use_hybrid,
         config.session_id or "(none)",
     )
     logger.debug(
@@ -47,7 +45,7 @@ async def run_pipeline(
     )
     require_text_client = not config.stage3_only_mode
     require_image_client = True
-    clients = await build_clients(config, require_text_client, require_image_client)
+    clients = build_clients(config, require_text_client, require_image_client)
     logger.debug(
         "[pipeline] clients ready | require_text_client=%s require_image_client=%s",
         require_text_client,
@@ -83,10 +81,7 @@ async def run_pipeline(
         gathered_info = await gather_product_info(
             user_input=user_input,
             image=image,
-            image_path=config.sample_image_path,
             genai_client=clients.genai_client,
-            gemini_client=clients.gemini_client,
-            use_webapi=config.use_webapi,
             doc_texts=doc_texts or [],
             doc_filenames=doc_filenames or [],
             progress=progress,
@@ -97,10 +92,7 @@ async def run_pipeline(
         final_data = await generate_json_plan(
             gathered_info=gathered_info,
             image=image,
-            image_path=config.sample_image_path,
             genai_client=clients.genai_client,
-            gemini_client=clients.gemini_client,
-            use_webapi=config.use_webapi,
             output_json_path=config.final_output_path,
             progress=progress,
             selected_style_profile_id=selected_style_profile_id,
@@ -111,13 +103,9 @@ async def run_pipeline(
     saved_files = await generate_all_images(
         final_data=final_data,
         image=image,
-        image_path=config.sample_image_path,
         picture_dir=config.picture_dir,
         session_id=config.session_id,
         genai_client=clients.genai_client,
-        gemini_client=clients.gemini_client,
-        use_webapi=config.use_webapi,
-        use_hybrid=config.use_hybrid,
         progress=progress,
         selected_style_profile_id=selected_style_profile_id,
     )

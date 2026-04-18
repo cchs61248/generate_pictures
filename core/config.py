@@ -1,11 +1,6 @@
 import os
 from dataclasses import dataclass
 
-from core.app_logging import get_backend_logger
-
-logger = get_backend_logger("config")
-
-
 @dataclass(frozen=True)
 class ManagedEnvVar:
     """後端與設定頁共同使用的環境變數定義（鍵名 + 給使用者看的說明）。"""
@@ -70,11 +65,7 @@ def get_image_output_size() -> str:
 MANAGED_ENV_VARS: tuple[ManagedEnvVar, ...] = (
     ManagedEnvVar(
         "GOOGLE_API_KEY",
-        "Gemini 的 API 金鑰。使用 apikey 或 hybrid 模式時，文字與（非 Web）圖像生成需要此鍵。",
-    ),
-    ManagedEnvVar(
-        "GEMINI_BACKEND",
-        "後端模式：apikey（預設，純 API）、hybrid（階段一二用 API、階段三產圖走 Web API）。",
+        "Gemini 的 API 金鑰；階段一至三文字與圖像生成皆使用此鍵。",
     ),
     ManagedEnvVar(
         "STAGE3_ONLY_MODE",
@@ -100,14 +91,6 @@ MANAGED_ENV_VARS: tuple[ManagedEnvVar, ...] = (
         "IMAGE_OUTPUT_SIZE",
         "API 產圖輸出尺寸：512(中文可能變形)、1K、2K 或 4K（預設 1K）。含大量中文時可試 2K 以減少字元變形。",
     ),
-    ManagedEnvVar(
-        "GEMINI_COOKIE_1PSID",
-        "使用 webapi / hybrid 時，從瀏覽器取得之 __Secure-1PSID Cookie（Gemini 網頁版登入）。",
-    ),
-    ManagedEnvVar(
-        "GEMINI_COOKIE_1PSIDTS",
-        "使用 webapi / hybrid 時，從瀏覽器取得之 __Secure-1PSIDTS Cookie。",
-    ),
 )
 
 MANAGED_ENV_KEYS: frozenset[str] = frozenset(v.key for v in MANAGED_ENV_VARS)
@@ -116,8 +99,6 @@ MANAGED_ENV_KEYS: frozenset[str] = frozenset(v.key for v in MANAGED_ENV_VARS)
 ENV_VARS_HIDDEN_FROM_SETTINGS_UI: frozenset[str] = frozenset(
     {
         "STAGE3_ONLY_MODE",
-        "GEMINI_COOKIE_1PSID",
-        "GEMINI_COOKIE_1PSIDTS",
     }
 )
 
@@ -125,13 +106,8 @@ ENV_VARS_HIDDEN_FROM_SETTINGS_UI: frozenset[str] = frozenset(
 @dataclass
 class AppConfig:
     project_root: str
-    backend: str
-    use_webapi: bool
-    use_hybrid: bool
     stage3_only_mode: bool
     api_key: str
-    psid: str
-    psidts: str
     sample_image_path: str
     final_output_path: str
     picture_dir: str
@@ -222,14 +198,6 @@ def sync_managed_env_from_dotenv(env_path: str) -> None:
 
 
 def parse_config(stage3_only_flag: bool) -> AppConfig:
-    backend_raw = os.environ.get("GEMINI_BACKEND", "apikey")
-    backend = (backend_raw or "apikey").lower().strip()
-    if backend not in {"apikey", "webapi", "hybrid"}:
-        logger.warning(
-            f'⚠️ GEMINI_BACKEND 應為 apikey、webapi 或 hybrid，目前為「{backend_raw}」，將依 apikey 處理。'
-        )
-        backend = "apikey"
-
     stage3_only_mode = (
         os.environ.get("STAGE3_ONLY_MODE", "").lower() in {"1", "true", "yes"}
         or stage3_only_flag
@@ -247,13 +215,8 @@ def parse_config(stage3_only_flag: bool) -> AppConfig:
 
     return AppConfig(
         project_root=project_root,
-        backend=backend,
-        use_webapi=(backend == "webapi"),
-        use_hybrid=(backend == "hybrid"),
         stage3_only_mode=stage3_only_mode,
         api_key=os.environ.get("GOOGLE_API_KEY") or "",
-        psid=os.environ.get("GEMINI_COOKIE_1PSID", ""),
-        psidts=os.environ.get("GEMINI_COOKIE_1PSIDTS", ""),
         sample_image_path=sample_image_path,
         final_output_path=final_output_path,
         picture_dir=picture_dir,

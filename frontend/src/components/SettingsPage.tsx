@@ -37,7 +37,6 @@ type Props = {
   onStyleLearningChanged?: () => void
 }
 
-const GEMINI_BACKEND_OPTIONS = ["apikey", "hybrid"] as const
 const STYLE_PROFILE_LIMIT = 5
 const STYLE_HISTORY_TYPE_LABELS: Record<string, string> = {
   rollback: "回滾",
@@ -56,15 +55,6 @@ function clampMaxLlmSearchCallsInput(raw: string): string {
   if (Number.isNaN(n)) return ""
   n = Math.min(9, Math.max(0, n))
   return String(n)
-}
-
-function normalizeGeminiBackend(raw: string): string {
-  const t = raw.trim().toLowerCase()
-  return GEMINI_BACKEND_OPTIONS.includes(
-    t as (typeof GEMINI_BACKEND_OPTIONS)[number],
-  )
-    ? t
-    : "apikey"
 }
 
 function isApiKeyEnvKey(key: string): boolean {
@@ -201,11 +191,9 @@ export function SettingsPage({
         data.variables
           .filter((v) => !ENV_KEYS_HIDDEN_FROM_SETTINGS_UI.has(v.key))
           .map((v) =>
-            v.key === "GEMINI_BACKEND"
-              ? { ...v, value: normalizeGeminiBackend(v.value) }
-              : v.key === "MAX_LLM_SEARCH_CALLS"
-                ? { ...v, value: clampMaxLlmSearchCallsInput(v.value) }
-                : v,
+            v.key === "MAX_LLM_SEARCH_CALLS"
+              ? { ...v, value: clampMaxLlmSearchCallsInput(v.value) }
+              : v,
           ),
       )
     } catch (e) {
@@ -562,21 +550,7 @@ export function SettingsPage({
                     </label>
                     <p className="settings-env-desc">{row.description}</p>
                   </div>
-                  {row.key === "GEMINI_BACKEND" ? (
-                    <select
-                      id={`env-${row.key}`}
-                      className="settings-env-input settings-env-select"
-                      value={normalizeGeminiBackend(row.value)}
-                      onChange={(e) => setValue(row.key, e.target.value)}
-                      aria-label="GEMINI_BACKEND"
-                    >
-                      {GEMINI_BACKEND_OPTIONS.map((opt) => (
-                        <option key={opt} value={opt}>
-                          {opt}
-                        </option>
-                      ))}
-                    </select>
-                  ) : row.key === "TEXT_MODEL" || row.key === "IMAGE_MODEL" ? (
+                  {row.key === "TEXT_MODEL" || row.key === "IMAGE_MODEL" ? (
                     <select
                       id={`env-${row.key}`}
                       className="settings-env-input settings-env-select"

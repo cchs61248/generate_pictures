@@ -4,7 +4,7 @@
 負責：
   - P1~P9 JSON 候選文字抽取
   - 嚴格格式驗證（9 筆、固定欄位、固定 main 值）
-  - LLM 二次修復（API 模式與 Web 模式）
+  - LLM 二次修復（Gemini API）
 """
 import json
 import re
@@ -98,22 +98,4 @@ def repair_to_json_apikey(genai_client, raw_text: str) -> list[dict]:
             temperature=0.0,
         ),
     )
-    return json.loads(extract_json_candidate(repaired.text or ""))
-
-
-async def repair_to_json_webapi(gemini_client, raw_text: str) -> list[dict]:
-    repair_prompt = f"""
-{prompt_template}
-
-請把以下內容修復成「合法 JSON」，並且只輸出 JSON 陣列本體，不要有任何額外文字。
-必須符合：
-1. 根節點是長度 9 的陣列（P1~P9）。
-2. 每筆固定 key：sort, main, scene, copy, specs。
-3. copy 固定 key：headline, subline, tags。
-4. main 與 sort 必須是既定順序與固定值。
-
-以下是待修復原文：
-{raw_text}
-"""
-    repaired = await gemini_client.generate_content(repair_prompt, model="gemini-3-flash-thinking")
     return json.loads(extract_json_candidate(repaired.text or ""))

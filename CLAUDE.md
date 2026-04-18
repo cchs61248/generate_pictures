@@ -64,8 +64,7 @@ api/
 | 檔案 | 職責 |
 |------|------|
 | `core/config.py` | env 管理、`AppConfig`、模型清單、`.env` 讀寫 |
-| `core/clients.py` | 依 config 組 Gemini API / Web client |
-| `core/gemini_web_client.py` | Gemini 網頁版 HTTP 協定層 |
+| `core/clients.py` | 依 config 建立 Gemini API（`google.genai`）用戶端 |
 | `core/progress.py` | SSE 進度匯流排（`ProgressBus`） |
 | `core/token_logger.py` | `log_token_usage`、讀取 `data/token_usage.json`（thread-safe） |
 | `services/web_search.py` | Tavily / DuckDuckGo 搜尋與網頁抓取 |
