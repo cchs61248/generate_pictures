@@ -367,6 +367,29 @@ export default function App() {
     () => APP_BOOT.mainView,
   )
   const [settingsTab, setSettingsTab] = useState<"env" | "style">("env")
+  const [styleExtractPending, setStyleExtractPendingState] = useState(() => {
+    try {
+      return loadPersistedState()?.styleExtractPending === true
+    } catch {
+      return false
+    }
+  })
+  const setStyleExtractPending = useCallback((next: boolean) => {
+    setStyleExtractPendingState(next)
+  }, [])
+  const styleExtractPollPrevPendingRef = useRef<number | null>(null)
+
+  /* 舊版曾用 sessionStorage；遷移到與聊天狀態共用的 localStorage 後仍讀一次以免升級當下狀態遺失 */
+  useEffect(() => {
+    try {
+      if (sessionStorage.getItem("gnerate_style_extract_pending") === "1") {
+        setStyleExtractPendingState(true)
+        sessionStorage.removeItem("gnerate_style_extract_pending")
+      }
+    } catch {
+      /* ignore */
+    }
+  }, [])
   const [styleProfiles, setStyleProfiles] = useState<StyleProfile[]>([])
   const [styleDefaultProfileId, setStyleDefaultProfileId] = useState<string>("none")
   const styleProfileIdSet = useMemo(
@@ -579,6 +602,7 @@ export default function App() {
       mainView,
       pendingToolSession,
       uiScroll,
+      styleExtractPending,
     })
     if (!hydratedFromServer) return
 
@@ -669,6 +693,7 @@ export default function App() {
     pendingToolSession,
     sessions,
     uiScroll,
+    styleExtractPending,
   ])
 
   const activeSession = useMemo(() => {
@@ -969,6 +994,48 @@ export default function App() {
     }
   }, [baseUrl])
 
+  const onSettingsStyleLearningChanged = useCallback(() => {
+    void fetchStyleLearningStatus(baseUrl)
+      .then((status) => {
+        setStyleProfiles(status.profile?.profiles ?? [])
+        setStyleDefaultProfileId(status.profile?.default_profile_id ?? "none")
+      })
+      .catch(() => {})
+  }, [baseUrl])
+
+  /* 重新整理後若仍持久化為萃取中（或請求被中斷），輪詢待萃取筆數；後端完成後筆數下降則解除 */
+  useEffect(() => {
+    if (!styleExtractPending) {
+      styleExtractPollPrevPendingRef.current = null
+      return
+    }
+    const tick = () => {
+      void fetchStyleLearningStatus(baseUrl)
+        .then((st) => {
+          const q = st.queue_pending_total ?? 0
+          const prev = styleExtractPollPrevPendingRef.current
+          if (prev !== null && q < prev) {
+            setStyleExtractPending(false)
+          }
+          styleExtractPollPrevPendingRef.current = q
+        })
+        .catch(() => {})
+    }
+    tick()
+    const id = setInterval(tick, 4000)
+    return () => clearInterval(id)
+  }, [styleExtractPending, baseUrl, setStyleExtractPending])
+
+  /* 避免異常狀態（例如強制關分頁）導致永遠顯示萃取中 */
+  useEffect(() => {
+    if (!styleExtractPending) return
+    const maxWait = window.setTimeout(
+      () => setStyleExtractPending(false),
+      25 * 60 * 1000,
+    )
+    return () => window.clearTimeout(maxWait)
+  }, [styleExtractPending, setStyleExtractPending])
+
   useEffect(() => {
     if (effectiveDefaultStyleProfileId === "none") return
     setPendingToolSession((p) => {
@@ -1011,6 +1078,9 @@ export default function App() {
       setPendingToolSession(normalized.pendingToolSession)
       setMainView(resolvePersistedMainView(next))
       setUiScroll(next.uiScroll ?? {})
+      if (typeof next.styleExtractPending === "boolean") {
+        setStyleExtractPendingState(next.styleExtractPending)
+      }
       composerBySessionRef.current = {}
       resetInputAndUpload()
     }
@@ -1018,7 +1088,12 @@ export default function App() {
     return () => {
       window.removeEventListener("storage", handleStorage)
     }
-  }, [flushMessagesScroll, flushSettingsMainScroll, resetInputAndUpload])
+  }, [
+    flushMessagesScroll,
+    flushSettingsMainScroll,
+    resetInputAndUpload,
+    setStyleExtractPendingState,
+  ])
 
   const handleNewToolChat = useCallback(
     (toolId: string) => {
@@ -2121,14 +2196,9 @@ export default function App() {
                 }
                 activeTab={settingsTab}
                 onTabChange={setSettingsTab}
-                onStyleLearningChanged={() => {
-                  void fetchStyleLearningStatus(baseUrl)
-                    .then((status) => {
-                      setStyleProfiles(status.profile?.profiles ?? [])
-                      setStyleDefaultProfileId(status.profile?.default_profile_id ?? "none")
-                    })
-                    .catch(() => {})
-                }}
+                onStyleLearningChanged={onSettingsStyleLearningChanged}
+                styleExtractPending={styleExtractPending}
+                setStyleExtractPending={setStyleExtractPending}
               />
             ) : mainView === "token_usage" ? (
               <TokenUsagePage

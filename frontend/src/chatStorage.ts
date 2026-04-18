@@ -33,6 +33,8 @@ export type PersistedState = {
    */
   pendingToolSession?: ChatSession | null
   uiScroll?: PersistedUiScroll
+  /** 設定頁手動風格萃取進行中（與後端非同步；需與主狀態一併持久化） */
+  styleExtractPending?: boolean
 }
 
 /**

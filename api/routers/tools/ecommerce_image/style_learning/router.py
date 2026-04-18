@@ -1,3 +1,4 @@
+import asyncio
 import os
 
 import google.genai as genai
@@ -115,14 +116,20 @@ async def style_learning_extract():
     if not api_key:
         logger.warning("[style_learning/extract] GOOGLE_API_KEY not set")
         raise HTTPException(status_code=400, detail="未設定 GOOGLE_API_KEY")
-    try:
+
+    def _extract_sync() -> dict:
         client = genai.Client(api_key=api_key)
-        result = extract_style_profile(
+        return extract_style_profile(
             root=root,
             genai_client=client,
             base_style_prompt=base_style_prompt,
             actor="manual-ui",
         )
+
+    try:
+        # 同步 LLM／檔案鎖會長時間佔用；若在 async 內直接呼叫會塞住整個 event loop，
+        # 導致其他請求（例如設定頁載入 /settings/env）全部排隊直到萃取結束。
+        result = await asyncio.to_thread(_extract_sync)
         logger.info("[style_learning/extract] done")
         return result
     except Exception as exc:

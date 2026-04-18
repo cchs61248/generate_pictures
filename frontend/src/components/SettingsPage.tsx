@@ -1,4 +1,5 @@
 import {
+  memo,
   useCallback,
   useEffect,
   useLayoutEffect,
@@ -35,6 +36,9 @@ type Props = {
   activeTab?: "env" | "style"
   onTabChange?: (tab: "env" | "style") => void
   onStyleLearningChanged?: () => void
+  /** 由 App 持有：切換主視圖 / 重新整理後仍知萃取是否進行中 */
+  styleExtractPending: boolean
+  setStyleExtractPending: (pending: boolean) => void
 }
 
 const STYLE_PROFILE_LIMIT = 5
@@ -142,13 +146,15 @@ function styleHistoryActionText(item: StyleLearningHistoryItem): string {
   return JSON.stringify(item)
 }
 
-export function SettingsPage({
+function SettingsPageComponent({
   baseUrl,
   scrollContainerRef,
   savedMainScrollTop,
   activeTab: activeTabProp,
   onTabChange,
   onStyleLearningChanged,
+  styleExtractPending,
+  setStyleExtractPending,
 }: Props) {
   const [activeTab, setActiveTab] = useState<"env" | "style">(activeTabProp ?? "env")
   useEffect(() => {
@@ -329,7 +335,7 @@ export function SettingsPage({
       )
       return
     }
-    setStyleBusy(true)
+    setStyleExtractPending(true)
     setStyleMsg(null)
     setError(null)
     try {
@@ -343,13 +349,14 @@ export function SettingsPage({
           `未執行萃取：${result.reason ?? "未知原因"}（queue ${result.queue_before}）`,
         )
       }
-      await refreshStyleAll(1, 1)
-      onStyleLearningChanged?.()
+      void refreshStyleAll(1, 1)
+        .then(() => onStyleLearningChanged?.())
+        .catch(() => {})
     } catch (e) {
       const msg = e instanceof Error ? e.message : String(e)
       setError(msg)
     } finally {
-      setStyleBusy(false)
+      setStyleExtractPending(false)
     }
   }
 
@@ -652,7 +659,11 @@ export function SettingsPage({
               <button
                 type="button"
                 className="settings-save"
-                disabled={styleBusy || (styleStatus?.queue_pending_total ?? 0) <= 0}
+                disabled={
+                  styleExtractPending ||
+                  styleBusy ||
+                  (styleStatus?.queue_pending_total ?? 0) <= 0
+                }
                 onClick={() => void handleExtract()}
                 title={
                   (styleStatus?.queue_pending_total ?? 0) <= 0
@@ -660,7 +671,7 @@ export function SettingsPage({
                     : undefined
                 }
               >
-                {styleBusy ? "處理中…" : "手動執行萃取"}
+                {styleExtractPending ? "萃取中…" : "手動執行萃取"}
               </button>
               <button
                 type="button"
@@ -941,3 +952,5 @@ export function SettingsPage({
     </div>
   )
 }
+
+export const SettingsPage = memo(SettingsPageComponent)
