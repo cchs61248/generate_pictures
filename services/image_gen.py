@@ -28,7 +28,7 @@ def resolve_picture_style_template(selected_style_profile_id: str | None = None)
     logger.debug(
         "[image_gen] resolved style template | profile=%s preview=%s",
         selected_style_profile_id or "(default)",
-        _preview_text(merged, 500),
+        _preview_text(merged, 1000),
     )
     return merged
 
