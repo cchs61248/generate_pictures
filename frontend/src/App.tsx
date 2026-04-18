@@ -19,6 +19,7 @@ import {
   deleteSessionDocuments,
   deleteSessionUpload,
   deleteSessionUploadImage,
+  fetchEcommerceAwaitingPlan,
   fetchEcommerceRunStatus,
   fetchImageThreadRunStatus,
   fetchSessionState,
@@ -85,6 +86,8 @@ function createSession(toolId?: string, initialStyleProfileId = "none"): ChatSes
     toolId,
     selectedStyleProfileId: initialStyleProfileId || "none",
     lastRunEventSeq: 0,
+    imageGenerationMode: "auto",
+    awaitingStage3Selection: false,
   }
 }
 
@@ -150,12 +153,27 @@ function mergeSessionLists(
     const streamPrimed = taskCompleted
       ? false
       : local.streamPrimed || remoteSess.streamPrimed
+    const awaitingStage3Selection = taskCompleted
+      ? false
+      : Boolean(
+          local.awaitingStage3Selection || remoteSess.awaitingStage3Selection,
+        )
+    const imageGenerationMode =
+      local.imageGenerationMode === "select" ||
+      local.imageGenerationMode === "auto"
+        ? local.imageGenerationMode
+        : remoteSess.imageGenerationMode === "select" ||
+            remoteSess.imageGenerationMode === "auto"
+          ? remoteSess.imageGenerationMode
+          : "auto"
     merged.push({
       ...base,
       title: titleFromMessages(base.messages, base.title),
       taskCompleted,
       isRunning,
       streamPrimed,
+      awaitingStage3Selection,
+      imageGenerationMode,
       // 訊息區捲動位置為本地 UI 狀態，與 updatedAt 無關；合併時優先保留任一端有紀錄者
       messagesScrollTop:
         local.messagesScrollTop ?? remoteSess.messagesScrollTop,
@@ -345,6 +363,7 @@ export default function App() {
   const runControllersRef = useRef<Map<string, AbortController>>(new Map())
   /** StrictMode 會雙跑 effect；用世代號區分 abort 是否仍屬本輪，避免誤加「已停止」或清掉 isRunning */
   const resumeRunGenRef = useRef(0)
+  const restorePlanGenRef = useRef(0)
   /** 由 ChatWindow 註冊：切換／新建對話前先寫入目前訊息區捲動位置 */
   const messagesScrollFlushRef = useRef<() => void>(() => {})
   const messagesScrollPersistTimerRef = useRef<ReturnType<
@@ -734,8 +753,10 @@ export default function App() {
   const activeStreaming = activeSession?.isRunning ?? false
   const activeStreamPrimed = activeSession?.streamPrimed ?? false
   const taskCompleted = activeSession?.taskCompleted ?? false
-  /** taskCompleted 時不顯示串流 UI，避免殘留 isRunning 與完成旗標不一致 */
-  const streamUiActive = activeStreaming && !taskCompleted
+  const awaitingSelection = activeSession?.awaitingStage3Selection ?? false
+  /** taskCompleted 時不顯示串流 UI；待選圖時不顯示「輸入中」以免誤判為仍在跑 pipeline */
+  const streamUiActive =
+    activeStreaming && !taskCompleted && !awaitingSelection
   const clearOnNextSend = activeSession?.clearOnNextSend ?? false
   const imageThreadLocked = activeSession?.imageThreadLocked ?? false
 
@@ -1525,12 +1546,53 @@ export default function App() {
         ])
         return
       }
+      if (ev.type === "plan_ready") {
+        patchSessionMessages(sessionId, (m) => [
+          ...m,
+          {
+            id: newId(),
+            role: "assistant",
+            planSelection: {
+              items: ev.items,
+              selectedSorts: [],
+              settled: false,
+            },
+          },
+        ])
+        return
+      }
       if (ev.type === "complete") {
+        if (ev.awaiting_stage3_selection) {
+          patchSession(sessionId, (s) => ({
+            ...s,
+            isRunning: false,
+            streamPrimed: false,
+            taskCompleted: false,
+            awaitingStage3Selection: true,
+            updatedAt: Date.now(),
+          }))
+          return
+        }
+        patchSessionMessages(sessionId, (m) =>
+          m.map((msg) =>
+            msg.planSelection && !msg.planSelection.settled
+              ? {
+                  ...msg,
+                  planSelection: {
+                    ...msg.planSelection,
+                    settled: true,
+                    cancelled: false,
+                  },
+                }
+              : msg,
+          ),
+        )
         patchSession(sessionId, (s) => ({
           ...s,
           isRunning: false,
           streamPrimed: false,
           taskCompleted: true,
+          awaitingStage3Selection: false,
           updatedAt: Date.now(),
         }))
         return
@@ -1545,12 +1607,21 @@ export default function App() {
             error: true,
           },
         ])
-        patchSession(sessionId, (s) => ({
-          ...s,
-          isRunning: false,
-          streamPrimed: false,
-          updatedAt: Date.now(),
-        }))
+        patchSession(sessionId, (s) => {
+          const stillSelecting = s.messages.some(
+            (msg) =>
+              msg.planSelection &&
+              !msg.planSelection.settled &&
+              !msg.planSelection.cancelled,
+          )
+          return {
+            ...s,
+            isRunning: false,
+            streamPrimed: false,
+            updatedAt: Date.now(),
+            awaitingStage3Selection: stillSelecting,
+          }
+        })
       }
     },
     [baseUrl, patchSession, patchSessionMessages],
@@ -1559,8 +1630,143 @@ export default function App() {
   const applyEcommerceRunStreamEventRef = useRef(applyEcommerceRunStreamEvent)
   applyEcommerceRunStreamEventRef.current = applyEcommerceRunStreamEvent
 
+  const handlePlanToggleSort = useCallback(
+    (sessionId: string, messageId: string, sort: number) => {
+      patchSessionMessages(sessionId, (m) =>
+        m.map((msg) => {
+          if (
+            msg.id !== messageId ||
+            !msg.planSelection ||
+            msg.planSelection.settled
+          ) {
+            return msg
+          }
+          const sel = msg.planSelection.selectedSorts
+          const next = sel.includes(sort)
+            ? sel.filter((x) => x !== sort)
+            : [...sel, sort].sort((a, b) => a - b)
+          return {
+            ...msg,
+            planSelection: { ...msg.planSelection, selectedSorts: next },
+          }
+        }),
+      )
+    },
+    [patchSessionMessages],
+  )
+
+  const handlePlanCancel = useCallback(
+    (sessionId: string, messageId: string) => {
+      patchSessionMessages(sessionId, (m) =>
+        m.map((msg) => {
+          if (msg.id !== messageId || !msg.planSelection) return msg
+          return {
+            ...msg,
+            planSelection: {
+              ...msg.planSelection,
+              settled: true,
+              cancelled: true,
+            },
+          }
+        }),
+      )
+      patchSession(sessionId, (s) => ({
+        ...s,
+        taskCompleted: true,
+        awaitingStage3Selection: false,
+        updatedAt: Date.now(),
+      }))
+    },
+    [patchSession, patchSessionMessages],
+  )
+
+  const handlePlanConfirm = useCallback(
+    async (sessionId: string, messageId: string) => {
+      const sess =
+        sessionsRef.current.find((s) => s.id === sessionId) ??
+        pendingToolSessionRef.current
+      const msg = sess?.messages.find((m) => m.id === messageId)
+      const sorts = msg?.planSelection?.selectedSorts
+      if (
+        !sorts?.length ||
+        !msg ||
+        msg.planSelection?.settled ||
+        runControllersRef.current.has(sessionId)
+      ) {
+        return
+      }
+      const selectedStyleProfileId = resolveStyleProfileId(sess ?? null)
+      const aborter = new AbortController()
+      runControllersRef.current.set(sessionId, aborter)
+      patchSession(sessionId, (s) => ({
+        ...s,
+        isRunning: true,
+        streamPrimed: false,
+        awaitingStage3Selection: false,
+        updatedAt: Date.now(),
+      }))
+      try {
+        await consumeRunStream(
+          "",
+          baseUrl,
+          (ev, meta) =>
+            applyEcommerceRunStreamEventRef.current(sessionId, ev, meta),
+          aborter.signal,
+          sessionId,
+          selectedStyleProfileId,
+          {
+            stage3Only: true,
+            selectedSorts: sorts,
+            imageGenerationMode: "auto",
+          },
+        )
+      } catch (e) {
+        if (e instanceof DOMException && e.name === "AbortError") {
+          patchSessionMessages(sessionId, (m) => [
+            ...m,
+            { id: newId(), role: "assistant", text: "已停止目前流程。" },
+          ])
+        } else {
+          const errMsg = e instanceof Error ? e.message : String(e)
+          patchSessionMessages(sessionId, (m) => [
+            ...m,
+            {
+              id: newId(),
+              role: "assistant",
+              text: `執行失敗：${errMsg}`,
+              error: true,
+            },
+          ])
+        }
+      } finally {
+        if (runControllersRef.current.get(sessionId) === aborter) {
+          runControllersRef.current.delete(sessionId)
+        }
+        patchSession(sessionId, (s) => {
+          const stillSelecting = s.messages.some(
+            (x) =>
+              x.planSelection &&
+              !x.planSelection.settled &&
+              !x.planSelection.cancelled,
+          )
+          return {
+            ...s,
+            isRunning: false,
+            streamPrimed: false,
+            awaitingStage3Selection: stillSelecting,
+            updatedAt: Date.now(),
+          }
+        })
+      }
+    },
+    [baseUrl, patchSession, patchSessionMessages, resolveStyleProfileId],
+  )
+
   const handleSend = useCallback(async () => {
     if (taskCompleted) {
+      return
+    }
+    if (activeSession?.awaitingStage3Selection) {
       return
     }
     const text = inputText.trim()
@@ -1744,6 +1950,9 @@ export default function App() {
         aborter.signal,
         sessionId,
         resolveStyleProfileId(activeSession),
+        {
+          imageGenerationMode: activeSession?.imageGenerationMode ?? "auto",
+        },
       )
     } catch (e) {
       if (e instanceof DOMException && e.name === "AbortError") {
@@ -1787,6 +1996,8 @@ export default function App() {
     }
   }, [
     activeId,
+    activeSession?.awaitingStage3Selection,
+    activeSession?.imageGenerationMode,
     activeSession?.title,
     activeSession?.selectedStyleProfileId,
     baseUrl,
@@ -1941,7 +2152,80 @@ export default function App() {
     }
   }, [hydratedFromServer, activeId, baseUrl, patchSession, patchSessionMessages])
 
-  const busy = streamUiActive || uploading
+  /** 待選圖：localStorage 無卡片時自後端 run_job 還原 */
+  useEffect(() => {
+    if (!hydratedFromServer) return
+    const sid = activeId
+    const pend = pendingToolSessionRef.current
+    const sess =
+      pend && pend.id === sid && !pend.parentId
+        ? pend
+        : sessionsRef.current.find((s) => s.id === sid)
+    if (!sess || sess.toolId !== "ecommerce-image") return
+    if (sess.parentId) return
+    if (sess.taskCompleted) return
+    if (runControllersRef.current.has(sid)) return
+
+    const hasUnsettled = sess.messages.some(
+      (m) => m.planSelection && !m.planSelection.settled,
+    )
+    if (hasUnsettled) {
+      if (!sess.awaitingStage3Selection) {
+        patchSession(sid, (s) => ({
+          ...s,
+          awaitingStage3Selection: true,
+          updatedAt: Date.now(),
+        }))
+      }
+      return
+    }
+
+    restorePlanGenRef.current += 1
+    const myGen = restorePlanGenRef.current
+    const aborter = new AbortController()
+    void (async () => {
+      try {
+        const st = await fetchEcommerceRunStatus(sid, baseUrl, aborter.signal)
+        if (myGen !== restorePlanGenRef.current) return
+        if (!st.awaiting_stage3_selection) return
+        const plan = await fetchEcommerceAwaitingPlan(
+          sid,
+          baseUrl,
+          aborter.signal,
+        )
+        if (myGen !== restorePlanGenRef.current) return
+        const planItems = plan.items
+        if (!plan.awaiting || !planItems?.length) return
+        patchSessionMessages(sid, (m) => [
+          ...m,
+          {
+            id: newId(),
+            role: "assistant",
+            planSelection: {
+              items: planItems,
+              selectedSorts: [],
+              settled: false,
+            },
+          },
+        ])
+        patchSession(sid, (s) => ({
+          ...s,
+          awaitingStage3Selection: true,
+          taskCompleted: false,
+          updatedAt: Date.now(),
+        }))
+      } catch {
+        /* 無紀錄或非待選狀態 */
+      }
+    })()
+    return () => {
+      restorePlanGenRef.current += 1
+      aborter.abort()
+    }
+  }, [hydratedFromServer, activeId, baseUrl, patchSession, patchSessionMessages])
+
+  /** 待選圖時鎖定輸入列（文字、送出、上傳圖／附件）；選圖卡片另由 planInteractionLocked 控制 */
+  const busy = streamUiActive || uploading || awaitingSelection
   const handleStop = useCallback(() => {
     const sid = activeId
     runControllersRef.current.get(sid)?.abort()
@@ -1965,6 +2249,18 @@ export default function App() {
       return
     }
     void cancelEcommerceRun(sid, baseUrl).catch(() => {})
+    if (!runControllersRef.current.has(sid)) {
+      patchSession(sid, (s) =>
+        s.isRunning || s.streamPrimed
+          ? {
+              ...s,
+              isRunning: false,
+              streamPrimed: false,
+              updatedAt: Date.now(),
+            }
+          : s,
+      )
+    }
   }, [
     activeId,
     activeSession?.imageThreadLocked,
@@ -2232,6 +2528,34 @@ export default function App() {
                   imageThreadLocked={imageThreadLocked}
                   onOpenImageThread={
                     activeSession?.parentId ? undefined : handleOpenImageThread
+                  }
+                  imageGenerationMode={
+                    activeSession?.imageGenerationMode ?? "auto"
+                  }
+                  onImageGenerationModeChange={(mode) => {
+                    patchActiveSession((s) => ({
+                      ...s,
+                      imageGenerationMode: mode,
+                      updatedAt: Date.now(),
+                    }))
+                  }}
+                  imageGenModeLocked={
+                    messages.length > 0 ||
+                    streamUiActive ||
+                    taskCompleted ||
+                    awaitingSelection
+                  }
+                  planInteractionLocked={Boolean(
+                    activeSession?.isRunning && !awaitingSelection,
+                  )}
+                  onPlanToggleSort={(messageId, sort) =>
+                    handlePlanToggleSort(activeId, messageId, sort)
+                  }
+                  onPlanConfirm={(messageId) =>
+                    void handlePlanConfirm(activeId, messageId)
+                  }
+                  onPlanCancel={(messageId) =>
+                    handlePlanCancel(activeId, messageId)
                   }
                 />
                 <InputBar

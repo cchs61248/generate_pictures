@@ -12,9 +12,21 @@ type Props = {
     bubbleTitle: string,
     sourceKey: string,
   ) => void
+  /** 選圖流程：串流中或流程已鎖定時為 true，禁用勾選與按鈕 */
+  planInteractionLocked?: boolean
+  onPlanToggleSort?: (messageId: string, sort: number) => void
+  onPlanConfirm?: (messageId: string) => void
+  onPlanCancel?: (messageId: string) => void
 }
 
-export function MessageBubble({ message, onOpenImageThread }: Props) {
+export function MessageBubble({
+  message,
+  onOpenImageThread,
+  planInteractionLocked = false,
+  onPlanToggleSort,
+  onPlanConfirm,
+  onPlanCancel,
+}: Props) {
   const isUser = message.role === "user"
 
   if (isUser) {
@@ -116,6 +128,69 @@ export function MessageBubble({ message, onOpenImageThread }: Props) {
             ) : (
               message.text
             )}
+          </div>
+        ) : null}
+        {message.planSelection ? (
+          <div className="msg-plan-selection">
+            {message.planSelection.settled && message.planSelection.cancelled ? (
+              <p className="msg-plan-cancelled">已取消產圖。</p>
+            ) : null}
+            {!message.planSelection.settled ? (
+              <>
+                <p className="msg-plan-title">請勾選要產出的圖片（對應階段二腳本）</p>
+                <div className="msg-plan-grid">
+                  {message.planSelection.items.map((item) => {
+                    const checked =
+                      message.planSelection!.selectedSorts.includes(item.sort)
+                    return (
+                      <label
+                        key={item.sort}
+                        className={`msg-plan-card${checked ? " msg-plan-card--checked" : ""}`}
+                      >
+                        <div className="msg-plan-card-head">
+                          <input
+                            type="checkbox"
+                            checked={checked}
+                            disabled={planInteractionLocked}
+                            onChange={() =>
+                              onPlanToggleSort?.(message.id, item.sort)
+                            }
+                          />
+                          <span className="msg-plan-card-title">
+                            P{String(item.sort).padStart(2, "0")}
+                          </span>
+                        </div>
+                        <p className="msg-plan-topic">
+                          <span className="msg-plan-topic-label">主題</span>
+                          {item.main}
+                        </p>
+                      </label>
+                    )
+                  })}
+                </div>
+                <div className="msg-plan-actions">
+                  <button
+                    type="button"
+                    className="msg-plan-btn msg-plan-btn--primary"
+                    disabled={
+                      planInteractionLocked ||
+                      message.planSelection.selectedSorts.length === 0
+                    }
+                    onClick={() => onPlanConfirm?.(message.id)}
+                  >
+                    確認產圖
+                  </button>
+                  <button
+                    type="button"
+                    className="msg-plan-btn"
+                    disabled={planInteractionLocked}
+                    onClick={() => onPlanCancel?.(message.id)}
+                  >
+                    取消
+                  </button>
+                </div>
+              </>
+            ) : null}
           </div>
         ) : null}
         {message.generatedImages && message.generatedImages.length > 0 ? (

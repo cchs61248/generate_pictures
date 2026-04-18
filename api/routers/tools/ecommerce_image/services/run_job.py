@@ -111,6 +111,13 @@ def repair_stale_running_on_disk(root: str, sid: str) -> None:
     _persist_snapshot(root, sid, data)
 
 
+def awaiting_stage3_from_events(events: list[Any]) -> bool:
+    for ev in reversed(events):
+        if isinstance(ev, dict) and ev.get("type") == "complete":
+            return bool(ev.get("awaiting_stage3_selection"))
+    return False
+
+
 def get_run_status_payload(root: str, sid: str) -> dict[str, Any]:
     """供 GET /run/status：記憶體優先，其次磁碟；會修復 stale running。"""
     job = _jobs.get(sid)
@@ -120,19 +127,22 @@ def get_run_status_payload(root: str, sid: str) -> dict[str, Any]:
             "session_id": sid,
             "has_active_task": job.task is not None and not job.task.done(),
             "event_count": len(job.events),
+            "awaiting_stage3_selection": awaiting_stage3_from_events(job.events),
         }
     disk = read_run_job_disk(root, sid)
     if not disk:
-        return {"status": "idle", "session_id": sid}
+        return {"status": "idle", "session_id": sid, "awaiting_stage3_selection": False}
     if disk.get("status") == "running":
         repair_stale_running_on_disk(root, sid)
         disk = read_run_job_disk(root, sid) or disk
     events = disk.get("events") or []
+    ev_list = events if isinstance(events, list) else []
     return {
         "status": disk.get("status", "idle"),
         "session_id": sid,
         "has_active_task": False,
-        "event_count": len(events) if isinstance(events, list) else 0,
+        "event_count": len(ev_list),
+        "awaiting_stage3_selection": awaiting_stage3_from_events(ev_list),
     }
 
 
@@ -150,6 +160,20 @@ class RunJobProgressSink:
         asyncio.run_coroutine_threadsafe(self._job.on_event(payload), self._loop)
 
 
+def parse_selected_sorts_payload(raw: object | None) -> list[int] | None:
+    if raw is None:
+        return None
+    if not isinstance(raw, list):
+        raise ValueError("selected_sorts 必須為整數陣列。")
+    out: list[int] = []
+    for x in raw:
+        try:
+            out.append(int(x))
+        except (TypeError, ValueError) as exc:
+            raise ValueError("selected_sorts 必須為整數陣列。") from exc
+    return out
+
+
 class RunJob:
     def __init__(
         self,
@@ -159,6 +183,8 @@ class RunJob:
         stage3_only: bool,
         selected_style_profile_id: str | None,
         request_id: str | None,
+        image_generation_mode: str = "auto",
+        selected_sorts: list[int] | None = None,
     ) -> None:
         self.root = root
         self.sid = sid
@@ -166,6 +192,8 @@ class RunJob:
         self.stage3_only = stage3_only
         self.selected_style_profile_id = selected_style_profile_id
         self.request_id = request_id
+        self.image_generation_mode = image_generation_mode
+        self.selected_sorts = selected_sorts
         self.status = "running"
         self.events: list[dict[str, Any]] = []
         self._next_seq = 1
@@ -178,12 +206,18 @@ class RunJob:
         user_input: str | None,
         stage3_only: bool,
         selected_style_profile_id: str | None,
+        image_generation_mode: str,
+        selected_sorts: list[int] | None,
     ) -> bool:
         a = (self.selected_style_profile_id or "") == (selected_style_profile_id or "")
+        s_self = tuple(sorted(self.selected_sorts or []))
+        s_new = tuple(sorted(selected_sorts or []))
         return (
             _normalize_user_input(self.user_input) == _normalize_user_input(user_input)
             and self.stage3_only == stage3_only
             and a
+            and (self.image_generation_mode or "auto") == (image_generation_mode or "auto")
+            and s_self == s_new
         )
 
     def _snapshot(self) -> dict[str, Any]:
@@ -197,6 +231,8 @@ class RunJob:
             "started_user_input": self.user_input,
             "stage3_only": self.stage3_only,
             "selected_style_profile_id": self.selected_style_profile_id,
+            "image_generation_mode": self.image_generation_mode,
+            "selected_sorts": list(self.selected_sorts or []),
             "last_seq": self._next_seq - 1,
             "events": list(ev),
         }
@@ -272,20 +308,24 @@ class RunJob:
                     doc_filenames=doc_filenames,
                     progress=sink,
                     selected_style_profile_id=self.selected_style_profile_id,
+                    image_generation_mode=self.image_generation_mode,
+                    selected_sorts=self.selected_sorts,
                 )
                 self.status = "completed"
                 logger.info(
-                    "[run_job] execute completed | sid=%s saved=%d",
+                    "[run_job] execute completed | sid=%s saved=%d awaiting_selection=%s",
                     self.sid,
                     len(result["saved_files"]),
+                    bool(result.get("awaiting_stage3_selection")),
                 )
-                await self.on_event(
-                    {
-                        "type": "complete",
-                        "saved_files": result["saved_files"],
-                        "final_output_path": result["final_output_path"],
-                    }
-                )
+                complete_ev: dict[str, Any] = {
+                    "type": "complete",
+                    "saved_files": result["saved_files"],
+                    "final_output_path": result["final_output_path"],
+                }
+                if result.get("awaiting_stage3_selection"):
+                    complete_ev["awaiting_stage3_selection"] = True
+                await self.on_event(complete_ev)
             except asyncio.CancelledError:
                 self.status = "cancelled"
                 logger.warning("[run_job] execute cancelled | sid=%s", self.sid)
@@ -375,6 +415,8 @@ async def precheck_and_spawn_run(
     stage3_only: bool,
     selected_style_profile_id: str | None,
     request_id: str | None = None,
+    image_generation_mode: str = "auto",
+    selected_sorts: list[int] | None = None,
 ) -> None:
     """
     於回傳 StreamingResponse 前呼叫（單一 lock）：若已有任務且參數不同則 409；
@@ -384,7 +426,11 @@ async def precheck_and_spawn_run(
         existing = _jobs.get(sid)
         if existing:
             if not existing.matches_launch_params(
-                user_input, stage3_only, selected_style_profile_id
+                user_input,
+                stage3_only,
+                selected_style_profile_id,
+                image_generation_mode,
+                selected_sorts,
             ):
                 raise HTTPException(
                     status_code=409,
@@ -403,6 +449,8 @@ async def precheck_and_spawn_run(
             stage3_only=stage3_only,
             selected_style_profile_id=selected_style_profile_id,
             request_id=request_id,
+            image_generation_mode=image_generation_mode,
+            selected_sorts=selected_sorts,
         )
         initial = new_job._snapshot()
         await asyncio.to_thread(_persist_snapshot, root, sid, initial)
@@ -411,8 +459,10 @@ async def precheck_and_spawn_run(
             new_job._execute_pipeline(), name=f"ecommerce_run_{sid}"
         )
     logger.info(
-        "[run_job] spawned new job | sid=%s stage3_only=%s",
+        "[run_job] spawned new job | sid=%s stage3_only=%s mode=%s sorts=%s",
         sid,
         stage3_only,
+        image_generation_mode,
+        selected_sorts,
         extra=log_extra(sid, request_id),
     )

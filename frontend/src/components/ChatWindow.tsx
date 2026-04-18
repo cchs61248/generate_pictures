@@ -19,6 +19,9 @@ function assistantMessagesSignature(messages: ChatMessage[]): string {
         lines: m.collapsible?.lines.length ?? 0,
         images: m.generatedImages?.length ?? 0,
         error: Boolean(m.error),
+        plan: m.planSelection
+          ? `${m.planSelection.settled ? "1" : "0"}:${m.planSelection.selectedSorts.join(",")}:${m.planSelection.cancelled ? "c" : ""}`
+          : "",
       }),
     )
     .join("|")
@@ -47,6 +50,16 @@ type Props = {
     bubbleTitle: string,
     sourceKey: string,
   ) => void
+  /** 電商工具：產圖模式 */
+  imageGenerationMode?: "auto" | "select"
+  onImageGenerationModeChange?: (mode: "auto" | "select") => void
+  /** 送出第一則訊息後或流程進行中，鎖定模式下拉 */
+  imageGenModeLocked?: boolean
+  /** 選圖卡片：串流中禁用操作 */
+  planInteractionLocked?: boolean
+  onPlanToggleSort?: (messageId: string, sort: number) => void
+  onPlanConfirm?: (messageId: string) => void
+  onPlanCancel?: (messageId: string) => void
 }
 
 export function ChatWindow({
@@ -61,6 +74,13 @@ export function ChatWindow({
   toolId,
   imageThreadLocked = false,
   onOpenImageThread,
+  imageGenerationMode = "auto",
+  onImageGenerationModeChange,
+  imageGenModeLocked = false,
+  planInteractionLocked = false,
+  onPlanToggleSort,
+  onPlanConfirm,
+  onPlanCancel,
 }: Props) {
   const bottomRef = useRef<HTMLDivElement>(null)
   const messagesElRef = useRef<HTMLDivElement>(null)
@@ -158,6 +178,28 @@ export function ChatWindow({
 
   return (
     <div className="chat-window">
+      {toolId === "ecommerce-image" &&
+      !imageThreadLocked &&
+      onImageGenerationModeChange ? (
+        <div className="chat-toolbar">
+          <label className="chat-toolbar-label">
+            <span className="chat-toolbar-text">產圖模式</span>
+            <select
+              className="chat-toolbar-select"
+              value={imageGenerationMode}
+              disabled={imageGenModeLocked}
+              onChange={(e) =>
+                onImageGenerationModeChange(
+                  e.target.value === "select" ? "select" : "auto",
+                )
+              }
+            >
+              <option value="auto">自動（產滿九張）</option>
+              <option value="select">選圖（階段二後挑選）</option>
+            </select>
+          </label>
+        </div>
+      ) : null}
       <div
         ref={messagesElRef}
         className="chat-messages"
@@ -195,6 +237,10 @@ export function ChatWindow({
               key={m.id}
               message={m}
               onOpenImageThread={onOpenImageThread}
+              planInteractionLocked={planInteractionLocked}
+              onPlanToggleSort={onPlanToggleSort}
+              onPlanConfirm={onPlanConfirm}
+              onPlanCancel={onPlanCancel}
             />
           ))}
           {streaming ? (

@@ -70,6 +70,11 @@ export function normalizePendingSession(raw: unknown): ChatSession | null {
       typeof p.lastRunEventSeq === "number" && Number.isFinite(p.lastRunEventSeq)
         ? Math.max(0, Math.trunc(p.lastRunEventSeq))
         : 0,
+    imageGenerationMode:
+      p.imageGenerationMode === "select" || p.imageGenerationMode === "auto"
+        ? p.imageGenerationMode
+        : "auto",
+    awaitingStage3Selection: Boolean(p.awaitingStage3Selection),
   }
 }
 
@@ -173,6 +178,14 @@ export function loadPersistedState(): PersistedState | null {
         Number.isFinite((s as Partial<ChatSession>).lastRunEventSeq)
           ? Math.max(0, Math.trunc((s as Partial<ChatSession>).lastRunEventSeq as number))
           : 0,
+      imageGenerationMode:
+        (s as Partial<ChatSession>).imageGenerationMode === "select" ||
+        (s as Partial<ChatSession>).imageGenerationMode === "auto"
+          ? (s as Partial<ChatSession>).imageGenerationMode
+          : "auto",
+      awaitingStage3Selection: Boolean(
+        (s as Partial<ChatSession>).awaitingStage3Selection,
+      ),
     }))
     const p = normalizePendingSession(data.pendingToolSession)
     if (p) {

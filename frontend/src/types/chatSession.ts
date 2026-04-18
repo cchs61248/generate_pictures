@@ -32,6 +32,10 @@ export type ChatSession = {
   selectedStyleProfileId?: string
   /** 最後接收到的 run-stream SSE 事件序號（用於斷線/刷新續傳） */
   lastRunEventSeq?: number
+  /** 電商工具：自動產滿九張 vs 階段二後選圖 */
+  imageGenerationMode?: "auto" | "select"
+  /** 電商工具：階段二已完成、等待使用者勾選要產的 P */
+  awaitingStage3Selection?: boolean
 }
 
 export const DEFAULT_SESSION_TITLE = "AI 電商圖文助手"

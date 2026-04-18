@@ -24,6 +24,23 @@ from api.routers.tools.ecommerce_image.utils.json_utils import validate_output
 logger = get_backend_logger("pipeline")
 
 
+def filter_final_data_by_sorts(final_data: list[dict], selected_sorts: list[int]) -> list[dict]:
+    """依使用者勾選的 P 編號過濾腳本；順序與 selected_sorts 唯一化後由小到大一致。"""
+    if not selected_sorts:
+        raise ValueError("selected_sorts 至少須指定一個 P 編號（1–9）。")
+    uniq = sorted({int(s) for s in selected_sorts})
+    for s in uniq:
+        if s < 1 or s > 9:
+            raise ValueError(f"sort 須為 1–9：{s}")
+    by_sort = {int(item["sort"]): item for item in final_data}
+    out: list[dict] = []
+    for s in uniq:
+        if s not in by_sort:
+            raise ValueError(f"JSON 中找不到 sort={s} 的腳本。")
+        out.append(by_sort[s])
+    return out
+
+
 async def run_pipeline(
     config: AppConfig,
     user_input: str | None = None,
@@ -31,6 +48,8 @@ async def run_pipeline(
     doc_filenames: list[str] | None = None,
     progress: ProgressBus | None = None,
     selected_style_profile_id: str | None = None,
+    image_generation_mode: str = "auto",
+    selected_sorts: list[int] | None = None,
 ) -> dict:
     logger.info(
         "[pipeline] start run_pipeline | stage3_only=%s session_id=%s",
@@ -38,10 +57,13 @@ async def run_pipeline(
         config.session_id or "(none)",
     )
     logger.debug(
-        "[pipeline] inputs summary | has_user_input=%s doc_count=%d selected_style_profile_id=%s",
+        "[pipeline] inputs summary | has_user_input=%s doc_count=%d selected_style_profile_id=%s "
+        "image_generation_mode=%s selected_sorts=%s",
         bool(user_input and user_input.strip()),
         len(doc_texts or []),
         selected_style_profile_id or "(default)",
+        image_generation_mode,
+        selected_sorts,
     )
     require_text_client = not config.stage3_only_mode
     require_image_client = True
@@ -73,6 +95,19 @@ async def run_pipeline(
             logger.error("[pipeline] final output JSON validation failed: %s", reason)
             raise ValueError(f"final_output.json 格式不正確：{reason}")
         logger.info("[pipeline] loaded final_output JSON successfully | topics=%d", len(final_data))
+        if selected_sorts is not None:
+            if len(selected_sorts) == 0:
+                raise ValueError("selected_sorts 不可為空清單；略過則產出全部腳本。")
+            final_data = filter_final_data_by_sorts(final_data, selected_sorts)
+            logger.info("[pipeline] filtered final_data for stage3 | count=%d", len(final_data))
+        if not os.path.exists(config.sample_image_path):
+            logger.error("[pipeline] sample image not found: %s", config.sample_image_path)
+            raise FileNotFoundError(
+                f"找不到參考商品圖：{config.sample_image_path}，無法執行階段三。"
+            )
+        image = Image.open(config.sample_image_path)
+        image.load()
+        logger.debug("[pipeline] stage3_only loaded reference image: %s", config.sample_image_path)
     else:
         if user_input is None:
             user_input = input("請輸入商品描述或相關網址 (例如 https://www.apple.com/tw/mac/)：\n> ")
@@ -99,6 +134,16 @@ async def run_pipeline(
         )
         logger.info("[pipeline] stage2 generate_json_plan done | topics=%d", len(final_data))
 
+        if image_generation_mode == "select":
+            logger.info("[pipeline] select mode: skip stage3, await user selection")
+            if progress:
+                await progress.emit({"type": "plan_ready", "items": final_data})
+            return {
+                "final_output_path": config.final_output_path,
+                "saved_files": [],
+                "awaiting_stage3_selection": True,
+            }
+
     logger.info("[pipeline] stage3 generate_all_images begin")
     saved_files = await generate_all_images(
         final_data=final_data,
@@ -115,4 +160,5 @@ async def run_pipeline(
     return {
         "final_output_path": config.final_output_path,
         "saved_files": saved_files,
+        "awaiting_stage3_selection": False,
     }

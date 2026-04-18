@@ -15,6 +15,24 @@ export type CollapsibleBlock = {
   lines: string[]
 }
 
+/** 階段二產出之單張腳本（與後端 JSON 一致） */
+export type EcommercePlanItem = {
+  main: string
+  scene: string
+  specs: string
+  sort: number
+  copy: { headline: string; subline: string; tags: string[] }
+}
+
+export type PlanSelectionState = {
+  items: EcommercePlanItem[]
+  selectedSorts: number[]
+  /** 已確認產圖或已取消，不可再操作 */
+  settled: boolean
+  /** 使用者按「取消」 */
+  cancelled?: boolean
+}
+
 export type ChatMessage = {
   id: string
   role: ChatRole
@@ -30,6 +48,8 @@ export type ChatMessage = {
   generatedImages?: string[]
   /** 是否為錯誤訊息 */
   error?: boolean
+  /** 選圖模式：九張腳本卡片 */
+  planSelection?: PlanSelectionState
 }
 
 export type StreamEvent =
@@ -37,8 +57,21 @@ export type StreamEvent =
   | { type: "collapsible_line"; group_id: string; line: string }
   | { type: "text_block"; format: string; content: string }
   | { type: "image_saved"; sort: number; main: string; saved_file: string }
-  | { type: "complete"; saved_files: string[]; final_output_path: string }
+  | { type: "plan_ready"; items: EcommercePlanItem[] }
+  | {
+      type: "complete"
+      saved_files: string[]
+      final_output_path: string
+      awaiting_stage3_selection?: boolean
+    }
   | { type: "error"; detail: string }
+
+/** POST /run-stream 額外選項（第二輪階段三等） */
+export type RunStreamExtras = {
+  imageGenerationMode?: "auto" | "select"
+  stage3Only?: boolean
+  selectedSorts?: number[] | null
+}
 
 export type SseEventMeta = {
   eventId?: number
@@ -219,6 +252,7 @@ export type RunResponse = {
   ok: boolean
   final_output_path: string
   saved_files: string[]
+  awaiting_stage3_selection?: boolean
 }
 
 export type SessionStatePayload = {
@@ -620,21 +654,32 @@ export async function consumeRunStream(
   signal?: AbortSignal,
   sessionId?: string,
   selectedStyleProfileId?: string,
+  extras?: RunStreamExtras,
 ): Promise<void> {
   logFrontend(baseUrl, "info", "consumeRunStream started", { sessionId })
+  const stage3Only = extras?.stage3Only ?? false
+  const body: Record<string, unknown> = {
+    user_input: userInput,
+    stage3_only: stage3Only,
+    session_id: sessionId,
+    selected_style_profile_id:
+      selectedStyleProfileId && selectedStyleProfileId !== "none"
+        ? selectedStyleProfileId
+        : null,
+    image_generation_mode: extras?.imageGenerationMode ?? "auto",
+  }
+  if (
+    stage3Only &&
+    extras?.selectedSorts != null &&
+    extras.selectedSorts.length > 0
+  ) {
+    body.selected_sorts = extras.selectedSorts
+  }
   const res = await fetch(`${trimSlash(baseUrl)}/run-stream`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     signal,
-    body: JSON.stringify({
-      user_input: userInput,
-      stage3_only: false,
-      session_id: sessionId,
-      selected_style_profile_id:
-        selectedStyleProfileId && selectedStyleProfileId !== "none"
-          ? selectedStyleProfileId
-          : null,
-    }),
+    body: JSON.stringify(body),
   })
   if (!res.ok) {
     const body = await safeJson(res)
@@ -693,6 +738,12 @@ export type EcommerceRunStatusResponse = {
   session_id?: string
   has_active_task?: boolean
   event_count?: number
+  awaiting_stage3_selection?: boolean
+}
+
+export type EcommerceAwaitingPlanResponse = {
+  awaiting: boolean
+  items: EcommercePlanItem[] | null
 }
 
 /** Normalize /images/ URLs to current getApiBaseUrl() (avoid host mismatch). */
@@ -726,6 +777,24 @@ export async function fetchEcommerceRunStatus(
     throw new Error(detail || `查詢任務狀態失敗 (${res.status})`)
   }
   return (await res.json()) as EcommerceRunStatusResponse
+}
+
+/** GET /run/awaiting-plan — 待選圖時取得九筆腳本（無 localStorage 備援） */
+export async function fetchEcommerceAwaitingPlan(
+  sessionId: string,
+  baseUrl: string,
+  signal?: AbortSignal,
+): Promise<EcommerceAwaitingPlanResponse> {
+  const res = await fetch(
+    `${trimSlash(baseUrl)}/run/awaiting-plan?session_id=${encodeURIComponent(sessionId)}`,
+    { signal },
+  )
+  if (!res.ok) {
+    const body = await safeJson(res)
+    const detail = extractDetail(body)
+    throw new Error(detail || `查詢選圖狀態失敗 (${res.status})`)
+  }
+  return (await res.json()) as EcommerceAwaitingPlanResponse
 }
 
 /** POST /run/cancel — 停止背景 pipeline */
