@@ -2465,7 +2465,14 @@ export default function App() {
                   </select>
                 ) : null}
               </div>
-              <p className="app-sub">API：{baseUrl}</p>
+              <p className="app-sub">
+                <span
+                  className="app-api-status"
+                  aria-hidden
+                  title="後端位址（開發時預設本機）"
+                />
+                <span>API：{baseUrl}</span>
+              </p>
             </div>
           </header>
           <main
