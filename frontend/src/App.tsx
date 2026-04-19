@@ -2441,29 +2441,6 @@ export default function App() {
                         ? (getToolById(activeSession.toolId)?.chatTitle ?? "AI 助手")
                         : "AI 電商圖文助手"}
                 </h1>
-                {mainView === "chat" ? (
-                  <select
-                    className="app-header-style-select"
-                    value={resolveStyleProfileId(activeSession)}
-                    onChange={(e) => {
-                      const profileId = e.target.value
-                      patchActiveSession((s) => ({
-                        ...s,
-                        selectedStyleProfileId: profileId || "none",
-                        updatedAt: Date.now(),
-                      }))
-                    }}
-                    aria-label="風格偏好"
-                    title="選擇是否套用歷史風格偏好"
-                  >
-                    <option value="none">不使用風格偏好</option>
-                    {sortedStyleProfiles.map((p) => (
-                      <option key={p.id} value={p.id}>
-                        {p.name}
-                      </option>
-                    ))}
-                  </select>
-                ) : null}
               </div>
               <p className="app-sub">
                 <span
@@ -2564,6 +2541,18 @@ export default function App() {
                   onPlanCancel={(messageId) =>
                     handlePlanCancel(activeId, messageId)
                   }
+                  styleProfileValue={resolveStyleProfileId(activeSession)}
+                  styleProfileOptions={sortedStyleProfiles.map((p) => ({
+                    id: p.id,
+                    name: p.name,
+                  }))}
+                  onStyleProfileChange={(profileId) => {
+                    patchActiveSession((s) => ({
+                      ...s,
+                      selectedStyleProfileId: profileId || "none",
+                      updatedAt: Date.now(),
+                    }))
+                  }}
                 />
                 <InputBar
                   value={inputText}

@@ -60,6 +60,10 @@ type Props = {
   onPlanToggleSort?: (messageId: string, sort: number) => void
   onPlanConfirm?: (messageId: string) => void
   onPlanCancel?: (messageId: string) => void
+  /** 電商工具：風格偏好（與產圖模式同列） */
+  styleProfileValue?: string
+  styleProfileOptions?: { id: string; name: string }[]
+  onStyleProfileChange?: (profileId: string) => void
 }
 
 export function ChatWindow({
@@ -81,6 +85,9 @@ export function ChatWindow({
   onPlanToggleSort,
   onPlanConfirm,
   onPlanCancel,
+  styleProfileValue = "none",
+  styleProfileOptions = [],
+  onStyleProfileChange,
 }: Props) {
   const bottomRef = useRef<HTMLDivElement>(null)
   const messagesElRef = useRef<HTMLDivElement>(null)
@@ -176,28 +183,75 @@ export function ChatWindow({
     })
   }
 
+  const showEcommerceToolbar =
+    toolId === "ecommerce-image" && onStyleProfileChange
+  const showImageModeRow =
+    showEcommerceToolbar && !imageThreadLocked && onImageGenerationModeChange
+  const showStyleOnlyBar =
+    showEcommerceToolbar && imageThreadLocked && !showImageModeRow
+
   return (
     <div className="chat-window">
-      {toolId === "ecommerce-image" &&
-      !imageThreadLocked &&
-      onImageGenerationModeChange ? (
+      {showImageModeRow ? (
         <div className="chat-toolbar">
-          <label className="chat-toolbar-label">
-            <span className="chat-toolbar-text">產圖模式</span>
-            <select
-              className="chat-toolbar-select"
-              value={imageGenerationMode}
-              disabled={imageGenModeLocked}
-              onChange={(e) =>
-                onImageGenerationModeChange(
-                  e.target.value === "select" ? "select" : "auto",
-                )
-              }
-            >
-              <option value="auto">自動（產滿九張）</option>
-              <option value="select">選圖（階段二後挑選）</option>
-            </select>
-          </label>
+          <div className="chat-toolbar-row">
+            <label className="chat-toolbar-label">
+              <span className="chat-toolbar-text">風格偏好</span>
+              <select
+                className="chat-toolbar-select"
+                value={styleProfileValue}
+                onChange={(e) => onStyleProfileChange(e.target.value)}
+                aria-label="風格偏好"
+                title="選擇是否套用歷史風格偏好"
+              >
+                <option value="none">不使用風格偏好</option>
+                {styleProfileOptions.map((p) => (
+                  <option key={p.id} value={p.id}>
+                    {p.name}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <label className="chat-toolbar-label">
+              <span className="chat-toolbar-text">產圖模式</span>
+              <select
+                className="chat-toolbar-select"
+                value={imageGenerationMode}
+                disabled={imageGenModeLocked}
+                onChange={(e) =>
+                  onImageGenerationModeChange!(
+                    e.target.value === "select" ? "select" : "auto",
+                  )
+                }
+                aria-label="產圖模式"
+              >
+                <option value="auto">自動（產滿九張）</option>
+                <option value="select">選圖（階段二後挑選）</option>
+              </select>
+            </label>
+          </div>
+        </div>
+      ) : showStyleOnlyBar ? (
+        <div className="chat-toolbar">
+          <div className="chat-toolbar-row">
+            <label className="chat-toolbar-label">
+              <span className="chat-toolbar-text">風格偏好</span>
+              <select
+                className="chat-toolbar-select"
+                value={styleProfileValue}
+                onChange={(e) => onStyleProfileChange(e.target.value)}
+                aria-label="風格偏好"
+                title="選擇是否套用歷史風格偏好"
+              >
+                <option value="none">不使用風格偏好</option>
+                {styleProfileOptions.map((p) => (
+                  <option key={p.id} value={p.id}>
+                    {p.name}
+                  </option>
+                ))}
+              </select>
+            </label>
+          </div>
         </div>
       ) : null}
       <div

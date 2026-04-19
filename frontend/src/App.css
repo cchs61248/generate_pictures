@@ -100,24 +100,6 @@
   gap: 0.6rem;
 }
 
-.app-header-style-select {
-  max-width: 220px;
-  border-radius: 999px;
-  border: 1px solid var(--border-medium);
-  background: var(--bg-elevated);
-  color: var(--text-primary);
-  padding: 0.28rem 0.7rem;
-  font-size: 0.78rem;
-  box-shadow: var(--shadow-dropdown);
-  cursor: pointer;
-}
-
-.app-header-style-select:focus-visible {
-  outline: none;
-  border-color: rgba(var(--accent-cyan-rgb), 0.55);
-  box-shadow: var(--focus-ring-cyan), var(--shadow-dropdown);
-}
-
 .app-sub {
   display: flex;
   align-items: center;
@@ -2110,7 +2092,7 @@
   color: rgba(227, 227, 227, 0.7);
 }
 
-/* 電商工具：產圖模式下拉 */
+/* 電商工具：風格偏好 + 產圖模式 */
 .chat-toolbar {
   flex-shrink: 0;
   padding: 0.5rem 1rem 0.35rem;
@@ -2121,16 +2103,28 @@
   color-scheme: dark;
 }
 
+.chat-toolbar-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.75rem 1.5rem;
+  width: 100%;
+}
+
 .chat-toolbar-label {
   display: inline-flex;
   align-items: center;
   gap: 0.5rem;
   font-size: 0.82rem;
   color: rgba(227, 227, 227, 0.75);
+  flex: 1 1 200px;
+  min-width: 0;
 }
 
 .chat-toolbar-select {
-  min-width: 200px;
+  min-width: min(220px, 100%);
+  flex: 1;
+  max-width: 100%;
   padding: 0.35rem 0.6rem;
   border-radius: 8px;
   border: 1px solid var(--border-medium);
