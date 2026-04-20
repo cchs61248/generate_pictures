@@ -57,6 +57,7 @@ import { useObjectUrlForFile } from "./useObjectUrlForFile"
 import "./App.css"
 
 const STORAGE_KEY = "gnerate_pictures_chat_v1"
+const CANCEL_REBOUND_GUARD_MS = 15_000
 
 function newId(): string {
   return crypto.randomUUID()
@@ -126,6 +127,7 @@ function mergeSessionLists(
   const remoteMap = new Map(remoteFiltered.map((s) => [s.id, s]))
   const localMap = new Map(localFiltered.map((s) => [s.id, s]))
   const merged: ChatSession[] = []
+  const localOnly: ChatSession[] = []
   for (const [, remoteSess] of remoteMap) {
     const local = localMap.get(remoteSess.id)
     if (!local) {
@@ -168,9 +170,16 @@ function mergeSessionLists(
     })
   }
   for (const [, local] of localMap) {
-    if (!remoteMap.has(local.id)) merged.push(local)
+    if (!remoteMap.has(local.id)) localOnly.push(local)
   }
-  return merged
+  // 本地獨有 session（通常是剛建立、尚未被遠端同步）保留在前面，
+  // 避免高延遲環境下 hydrate 後被推到底部。
+  return [...localOnly, ...merged]
+}
+
+function isCancelGuardActive(session: ChatSession): boolean {
+  const at = session.cancelRequestedAt
+  return typeof at === "number" && Date.now() - at < CANCEL_REBOUND_GUARD_MS
 }
 
 type DocEntry = { serverFilename: string; originalName: string }
@@ -1486,6 +1495,7 @@ export default function App() {
         patchSession(sessionId, (s) => ({
           ...s,
           isRunning: false,
+          cancelRequestedAt: undefined,
           streamPrimed: false,
           updatedAt: Date.now(),
         }))
@@ -1504,6 +1514,7 @@ export default function App() {
         patchSession(sessionId, (s) => ({
           ...s,
           isRunning: false,
+          cancelRequestedAt: undefined,
           streamPrimed: false,
           updatedAt: Date.now(),
         }))
@@ -1614,6 +1625,7 @@ export default function App() {
           patchSession(sessionId, (s) => ({
             ...s,
             isRunning: false,
+          cancelRequestedAt: undefined,
             streamPrimed: false,
             taskCompleted: false,
             awaitingStage3Selection: true,
@@ -1638,6 +1650,7 @@ export default function App() {
         patchSession(sessionId, (s) => ({
           ...s,
           isRunning: false,
+          cancelRequestedAt: undefined,
           streamPrimed: false,
           taskCompleted: true,
           awaitingStage3Selection: false,
@@ -1665,6 +1678,7 @@ export default function App() {
           return {
             ...s,
             isRunning: false,
+            cancelRequestedAt: undefined,
             streamPrimed: false,
             updatedAt: Date.now(),
             awaitingStage3Selection: stillSelecting,
@@ -1691,6 +1705,7 @@ export default function App() {
           return {
             ...s,
             isRunning: false,
+            cancelRequestedAt: undefined,
             streamPrimed: false,
             clearOnNextSend: true,
             updatedAt: Date.now(),
@@ -1776,6 +1791,7 @@ export default function App() {
       patchSession(sessionId, (s) => ({
         ...s,
         isRunning: true,
+        cancelRequestedAt: undefined,
         streamPrimed: false,
         awaitingStage3Selection: false,
         updatedAt: Date.now(),
@@ -1827,6 +1843,7 @@ export default function App() {
           return {
             ...s,
             isRunning: false,
+            cancelRequestedAt: undefined,
             streamPrimed: false,
             awaitingStage3Selection: stillSelecting,
             updatedAt: Date.now(),
@@ -1869,6 +1886,7 @@ export default function App() {
       patchSession(sessionId, (s) => ({
         ...s,
         isRunning: true,
+        cancelRequestedAt: undefined,
         streamPrimed: false,
         updatedAt: Date.now(),
       }))
@@ -1911,6 +1929,7 @@ export default function App() {
         patchSession(sessionId, (s) => ({
           ...s,
           isRunning: false,
+          cancelRequestedAt: undefined,
           streamPrimed: false,
           updatedAt: Date.now(),
         }))
@@ -2012,6 +2031,7 @@ export default function App() {
     patchSession(sessionId, (s) => ({
       ...s,
       isRunning: true,
+      cancelRequestedAt: undefined,
       streamPrimed: false,
       lastRunEventSeq: 0,
       updatedAt: Date.now(),
@@ -2042,6 +2062,7 @@ export default function App() {
         patchSession(sessionId, (s) => ({
           ...s,
           isRunning: false,
+          cancelRequestedAt: undefined,
           streamPrimed: false,
           clearOnNextSend: true,
           updatedAt: Date.now(),
@@ -2065,6 +2086,7 @@ export default function App() {
       patchSession(sessionId, (s) => ({
         ...s,
         isRunning: false,
+        cancelRequestedAt: undefined,
         streamPrimed: false,
         updatedAt: Date.now(),
       }))
@@ -2136,11 +2158,15 @@ export default function App() {
               ? {
                   ...s,
                   isRunning: false,
+                  cancelRequestedAt: undefined,
                   streamPrimed: false,
                   updatedAt: Date.now(),
                 }
               : s,
           )
+          return
+        }
+        if (isCancelGuardActive(sess)) {
           return
         }
         if (runControllersRef.current.has(sid)) return
@@ -2149,6 +2175,7 @@ export default function App() {
         patchSession(sid, (s) => ({
           ...s,
           isRunning: true,
+          cancelRequestedAt: undefined,
           streamPrimed: false,
           updatedAt: Date.now(),
         }))
@@ -2187,6 +2214,7 @@ export default function App() {
           patchSession(sid, (s) => ({
             ...s,
             isRunning: false,
+            cancelRequestedAt: undefined,
             streamPrimed: false,
             clearOnNextSend: true,
             updatedAt: Date.now(),
@@ -2212,6 +2240,7 @@ export default function App() {
             patchSession(sid, (s) => ({
               ...s,
               isRunning: false,
+              cancelRequestedAt: undefined,
               streamPrimed: false,
               updatedAt: Date.now(),
             }))
@@ -2318,6 +2347,7 @@ export default function App() {
           ? {
               ...s,
               isRunning: false,
+              cancelRequestedAt: Date.now(),
               streamPrimed: false,
               clearOnNextSend: true,
               updatedAt: Date.now(),
@@ -2335,6 +2365,7 @@ export default function App() {
         ? {
             ...s,
             isRunning: false,
+            cancelRequestedAt: Date.now(),
             streamPrimed: false,
             clearOnNextSend: true,
             updatedAt: Date.now(),

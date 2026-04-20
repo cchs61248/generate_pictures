@@ -12,6 +12,8 @@ export type ChatSession = {
   updatedAt: number
   /** 此對話是否正在執行流程 */
   isRunning: boolean
+  /** 使用者按下停止的時間（ms）；用於避免延遲狀態回補造成 UI 反跳 */
+  cancelRequestedAt?: number
   /** 串流是否已收到第一筆事件 */
   streamPrimed: boolean
   /** 此對話任務是否已完成（完成後鎖住輸入） */
