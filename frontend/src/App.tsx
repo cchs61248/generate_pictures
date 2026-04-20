@@ -137,12 +137,10 @@ function mergeSessionLists(
     const base = useLocalContent ? local : remoteSess
     const taskCompleted =
       Boolean(local.taskCompleted) || Boolean(remoteSess.taskCompleted)
-    const isRunning = taskCompleted
-      ? false
-      : local.isRunning || remoteSess.isRunning
-    const streamPrimed = taskCompleted
-      ? false
-      : local.streamPrimed || remoteSess.streamPrimed
+    // 以較新的 session 內容為主，避免 version conflict 時把舊的 isRunning=true 黏住。
+    // 若背景任務真的仍在跑，run/status 重連機制會再把它設回 true。
+    const isRunning = taskCompleted ? false : Boolean(base.isRunning)
+    const streamPrimed = taskCompleted ? false : Boolean(base.streamPrimed)
     const awaitingStage3Selection = taskCompleted
       ? false
       : Boolean(
@@ -1672,6 +1670,33 @@ export default function App() {
             awaitingStage3Selection: stillSelecting,
           }
         })
+        return
+      }
+      if (ev.type === "cancelled") {
+        patchSessionMessages(sessionId, (m) => [
+          ...m,
+          {
+            id: newId(),
+            role: "assistant",
+            text: ev.detail || "已停止目前流程。",
+          },
+        ])
+        patchSession(sessionId, (s) => {
+          const stillSelecting = s.messages.some(
+            (msg) =>
+              msg.planSelection &&
+              !msg.planSelection.settled &&
+              !msg.planSelection.cancelled,
+          )
+          return {
+            ...s,
+            isRunning: false,
+            streamPrimed: false,
+            clearOnNextSend: true,
+            updatedAt: Date.now(),
+            awaitingStage3Selection: stillSelecting,
+          }
+        })
       }
     },
     [baseUrl, patchSession, patchSessionMessages],
@@ -2281,39 +2306,41 @@ export default function App() {
   const busy = streamUiActive || uploading || awaitingSelection
   const handleStop = useCallback(() => {
     const sid = activeId
-    runControllersRef.current.get(sid)?.abort()
     const isImageThread = Boolean(
       activeSession?.parentId || activeSession?.imageThreadLocked,
     )
     if (isImageThread) {
+      // 圖片討論串維持前端主動中斷：可立即停止長回覆串流
+      runControllersRef.current.get(sid)?.abort()
       void cancelImageThreadRun(sid, baseUrl).catch(() => {})
-      if (!runControllersRef.current.has(sid)) {
-        patchSession(sid, (s) =>
-          s.isRunning || s.streamPrimed
-            ? {
-                ...s,
-                isRunning: false,
-                streamPrimed: false,
-                updatedAt: Date.now(),
-              }
-            : s,
-        )
-      }
-      return
-    }
-    void cancelEcommerceRun(sid, baseUrl).catch(() => {})
-    if (!runControllersRef.current.has(sid)) {
       patchSession(sid, (s) =>
         s.isRunning || s.streamPrimed
           ? {
               ...s,
               isRunning: false,
               streamPrimed: false,
+              clearOnNextSend: true,
               updatedAt: Date.now(),
             }
           : s,
       )
+      return
     }
+    // 電商主流程不要先 abort，改由後端送出 cancelled 事件收尾，
+    // 避免使用者快速按停止時收不到終止事件、UI 仍停在不一致狀態。
+    void cancelEcommerceRun(sid, baseUrl).catch(() => {})
+    // 先關閉本地串流 UI，避免「已取消」訊息已出現但畫面仍顯示停止中。
+    patchSession(sid, (s) =>
+      s.isRunning || s.streamPrimed
+        ? {
+            ...s,
+            isRunning: false,
+            streamPrimed: false,
+            clearOnNextSend: true,
+            updatedAt: Date.now(),
+          }
+        : s,
+    )
   }, [
     activeId,
     activeSession?.imageThreadLocked,

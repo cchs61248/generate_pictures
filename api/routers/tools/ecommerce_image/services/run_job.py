@@ -329,7 +329,7 @@ class RunJob:
             except asyncio.CancelledError:
                 self.status = "cancelled"
                 logger.warning("[run_job] execute cancelled | sid=%s", self.sid)
-                await self.on_event({"type": "error", "detail": "已取消目前流程。"})
+                await self.on_event({"type": "cancelled", "detail": "已取消目前流程。"})
                 raise
             except Exception as exc:
                 self.status = "error"
@@ -373,12 +373,12 @@ async def subscribe_session_events(root: str, sid: str, from_seq: int = 0):
         try:
             for ev in replay:
                 yield ev
-                if ev.get("type") in ("complete", "error"):
+                if ev.get("type") in ("complete", "error", "cancelled"):
                     return
             while True:
                 ev = await q.get()
                 yield ev
-                if ev.get("type") in ("complete", "error"):
+                if ev.get("type") in ("complete", "error", "cancelled"):
                     return
         finally:
             await job.unregister_subscriber(q)
@@ -404,7 +404,7 @@ async def subscribe_session_events(root: str, sid: str, from_seq: int = 0):
                     continue
             yield ev
     last = events[-1] if events else None
-    if not isinstance(last, dict) or last.get("type") not in ("complete", "error"):
+    if not isinstance(last, dict) or last.get("type") not in ("complete", "error", "cancelled"):
         yield {"type": "error", "detail": "此 session 沒有進行中的任務。"}
 
 

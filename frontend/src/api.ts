@@ -64,6 +64,7 @@ export type StreamEvent =
       final_output_path: string
       awaiting_stage3_selection?: boolean
     }
+  | { type: "cancelled"; detail: string }
   | { type: "error"; detail: string }
 
 /** POST /run-stream 額外選項（第二輪階段三等） */
