@@ -4,6 +4,7 @@ import {
   useEffect,
   useLayoutEffect,
   useMemo,
+  useRef,
   useState,
   type RefObject,
 } from "react"
@@ -185,6 +186,7 @@ function SettingsPageComponent({
   const [styleMsg, setStyleMsg] = useState<string | null>(null)
   const [renamingProfileId, setRenamingProfileId] = useState<string | null>(null)
   const [renameInput, setRenameInput] = useState("")
+  const prevStyleExtractPendingRef = useRef(styleExtractPending)
 
   const load = useCallback(async () => {
     setError(null)
@@ -262,6 +264,22 @@ function SettingsPageComponent({
       loadStyleHistory(1),
     ])
   }, [activeTab, baseUrl, loadStyleHistory, loadStyleQueue, loadStyleStatus, queueScope])
+
+  /* 離開設定頁或重新整理期間萃取完成時，原 handleExtract 內的 refresh 可能作用在已卸載實例；待 App 將 pending 解除後再拉一次 */
+  useEffect(() => {
+    const prev = prevStyleExtractPendingRef.current
+    prevStyleExtractPendingRef.current = styleExtractPending
+    if (activeTab !== "style") return
+    if (!prev || styleExtractPending) return
+    void refreshStyleAll(1, 1)
+      .then(() => onStyleLearningChanged?.())
+      .catch(() => {})
+  }, [
+    activeTab,
+    styleExtractPending,
+    refreshStyleAll,
+    onStyleLearningChanged,
+  ])
 
   useLayoutEffect(() => {
     if (loading) return
@@ -349,9 +367,6 @@ function SettingsPageComponent({
           `未執行萃取：${result.reason ?? "未知原因"}（queue ${result.queue_before}）`,
         )
       }
-      void refreshStyleAll(1, 1)
-        .then(() => onStyleLearningChanged?.())
-        .catch(() => {})
     } catch (e) {
       const msg = e instanceof Error ? e.message : String(e)
       setError(msg)

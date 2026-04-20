@@ -35,6 +35,8 @@ export type PersistedState = {
   uiScroll?: PersistedUiScroll
   /** 設定頁手動風格萃取進行中（與後端非同步；需與主狀態一併持久化） */
   styleExtractPending?: boolean
+  /** 設定頁目前分頁（重新整理後留在風格學習） */
+  settingsTab?: "env" | "style"
 }
 
 /**

@@ -276,8 +276,11 @@ function stripReferenceForPurgedSessions(
 
 const APP_BOOT = (() => {
   const prep = prepareLocalStorageAfterFullPageReload()
+  const settingsTabInit: "env" | "style" =
+    prep.persisted?.settingsTab === "style" ? "style" : "env"
   return {
     ...computeInitialState(prep.persisted),
+    settingsTab: settingsTabInit,
     sessionIdsToDeleteUpload: prep.sessionIdsToDeleteUpload,
   }
 })()
@@ -385,7 +388,9 @@ export default function App() {
   const [mainView, setMainView] = useState<"chat" | "settings" | "token_usage">(
     () => APP_BOOT.mainView,
   )
-  const [settingsTab, setSettingsTab] = useState<"env" | "style">("env")
+  const [settingsTab, setSettingsTab] = useState<"env" | "style">(
+    () => APP_BOOT.settingsTab,
+  )
   const [styleExtractPending, setStyleExtractPendingState] = useState(() => {
     try {
       return loadPersistedState()?.styleExtractPending === true
@@ -622,6 +627,7 @@ export default function App() {
       pendingToolSession,
       uiScroll,
       styleExtractPending,
+      settingsTab,
     })
     if (!hydratedFromServer) return
 
@@ -713,6 +719,7 @@ export default function App() {
     sessions,
     uiScroll,
     styleExtractPending,
+    settingsTab,
   ])
 
   const activeSession = useMemo(() => {
@@ -1037,6 +1044,7 @@ export default function App() {
           const prev = styleExtractPollPrevPendingRef.current
           if (prev !== null && q < prev) {
             setStyleExtractPending(false)
+            onSettingsStyleLearningChanged()
           }
           styleExtractPollPrevPendingRef.current = q
         })
@@ -1045,7 +1053,12 @@ export default function App() {
     tick()
     const id = setInterval(tick, 4000)
     return () => clearInterval(id)
-  }, [styleExtractPending, baseUrl, setStyleExtractPending])
+  }, [
+    styleExtractPending,
+    baseUrl,
+    setStyleExtractPending,
+    onSettingsStyleLearningChanged,
+  ])
 
   /* 避免異常狀態（例如強制關分頁）導致永遠顯示萃取中 */
   useEffect(() => {
@@ -1102,6 +1115,9 @@ export default function App() {
       if (typeof next.styleExtractPending === "boolean") {
         setStyleExtractPendingState(next.styleExtractPending)
       }
+      if (next.settingsTab === "env" || next.settingsTab === "style") {
+        setSettingsTab(next.settingsTab)
+      }
       composerBySessionRef.current = {}
       resetInputAndUpload()
     }
@@ -1114,6 +1130,7 @@ export default function App() {
     flushSettingsMainScroll,
     resetInputAndUpload,
     setStyleExtractPendingState,
+    setSettingsTab,
   ])
 
   const handleNewToolChat = useCallback(
