@@ -135,6 +135,33 @@ export function MessageBubble({
             {message.planSelection.settled && message.planSelection.cancelled ? (
               <p className="msg-plan-cancelled">已取消產圖。</p>
             ) : null}
+            {message.planSelection.settled && !message.planSelection.cancelled ? (
+              <>
+                <p className="msg-plan-title">已確認產出以下腳本</p>
+                {message.planSelection.selectedSorts.length === 0 ? (
+                  <p className="msg-plan-cancelled">（無勾選項目）</p>
+                ) : (
+                  <ul className="msg-plan-settled-list">
+                    {[...message.planSelection.selectedSorts]
+                      .sort((a, b) => a - b)
+                      .map((sort) => {
+                        const item = message.planSelection!.items.find(
+                          (i) => i.sort === sort,
+                        )
+                        const label = `P${String(sort).padStart(2, "0")}`
+                        return (
+                          <li key={sort} className="msg-plan-settled-item">
+                            <span className="msg-plan-settled-code">{label}</span>
+                            <span className="msg-plan-settled-main">
+                              {item?.main?.trim() ? item.main : "—"}
+                            </span>
+                          </li>
+                        )
+                      })}
+                  </ul>
+                )}
+              </>
+            ) : null}
             {!message.planSelection.settled ? (
               <>
                 <p className="msg-plan-title">請勾選要產出的圖片（對應階段二腳本）</p>
