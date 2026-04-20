@@ -2330,6 +2330,7 @@
 
 .chat-toolbar-text {
   font-weight: 600;
+  font-size: 0.95rem;
   color: var(--text-heading);
 }
 
@@ -2337,7 +2338,7 @@
   display: inline-flex;
   align-items: center;
   gap: 0.5rem;
-  font-size: 0.82rem;
+  font-size: 0.95rem;
   color: var(--text-muted);
   flex: 1 1 200px;
   min-width: 0;
@@ -2347,12 +2348,12 @@
   min-width: min(220px, 100%);
   flex: 1;
   max-width: 100%;
-  padding: 0.35rem 0.6rem;
+  padding: 0.45rem 0.72rem;
   border-radius: 12px;
   border: 1px solid var(--border-medium);
   background-color: var(--bg-elevated);
   color: var(--text-body);
-  font-size: 0.82rem;
+  font-size: 0.95rem;
   box-shadow: 0 2px 10px rgba(74, 59, 50, 0.06);
   cursor: pointer;
   color-scheme: light;

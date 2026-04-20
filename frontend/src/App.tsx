@@ -62,16 +62,6 @@ function newId(): string {
   return crypto.randomUUID()
 }
 
-/** 重新訂閱串流前移除最後一則 user 之後的 assistant 片段，避免與重播重複。 */
-function trimMessagesAfterLastUser(messages: ChatMessage[]): ChatMessage[] {
-  let lastUser = -1
-  for (let i = 0; i < messages.length; i++) {
-    if (messages[i].role === "user") lastUser = i
-  }
-  if (lastUser < 0) return messages
-  return messages.slice(0, lastUser + 1)
-}
-
 function createSession(toolId?: string, initialStyleProfileId = "none"): ChatSession {
   const toolTitle = toolId ? getToolById(toolId)?.chatTitle : undefined
   return {
@@ -2130,13 +2120,11 @@ export default function App() {
         }
         if (runControllersRef.current.has(sid)) return
 
+        const resumeFromSeq = Math.max(0, Math.trunc(sess.lastRunEventSeq ?? 0))
         patchSession(sid, (s) => ({
           ...s,
-          // 重連時以「最後一則 user 之後整段重建」為準，避免工具/系統泡泡因遊標落差被跳過
-          messages: trimMessagesAfterLastUser(s.messages),
           isRunning: true,
           streamPrimed: false,
-          lastRunEventSeq: 0,
           updatedAt: Date.now(),
         }))
         if (myGen !== resumeRunGenRef.current) return
@@ -2150,7 +2138,7 @@ export default function App() {
               applyImageThreadStreamEventRef.current(sid, ev, meta)
             },
             aborter.signal,
-            0,
+            resumeFromSeq,
           )
         } else {
           await consumeRunStreamSubscribe(
@@ -2160,7 +2148,7 @@ export default function App() {
               applyEcommerceRunStreamEventRef.current(sid, ev, meta)
             },
             aborter.signal,
-            0,
+            resumeFromSeq,
           )
         }
       } catch (e) {
@@ -2230,6 +2218,11 @@ export default function App() {
       (m) => m.planSelection && !m.planSelection.settled,
     )
     if (hasUnsettled) {
+      // 若已進入階段三執行中（例如選圖後產圖途中刷新），不可回退成「待選圖」，
+      // 否則會把 loading/停止按鈕隱藏掉。
+      if (sess.isRunning) {
+        return
+      }
       if (!sess.awaitingStage3Selection) {
         patchSession(sid, (s) => ({
           ...s,
