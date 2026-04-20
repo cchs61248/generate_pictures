@@ -175,17 +175,31 @@
   font-size: 0.95rem;
 }
 
-.settings-page-intro {
+/* 標題、分頁與成功／錯誤提示一併黏在捲動區頂端，捲到下方仍看得到提示條 */
+.settings-page-sticky-head {
   position: sticky;
   top: 0;
   z-index: 10;
+  display: flex;
+  flex-direction: column;
+  gap: 0.65rem;
   padding: 0.25rem 0 0.75rem;
   margin: -0.25rem 0 1.25rem;
   background: var(--glass-bg);
   backdrop-filter: blur(var(--glass-blur));
   -webkit-backdrop-filter: blur(var(--glass-blur));
   border-bottom: 1px solid var(--border-subtle);
-  margin-bottom: 1.25rem;
+}
+
+.settings-page-sticky-head .settings-page-error,
+.settings-page-sticky-head .settings-page-success {
+  margin-bottom: 0;
+}
+
+.settings-page-intro {
+  padding: 0;
+  margin: 0;
+  background: transparent;
 }
 
 .settings-tabs {

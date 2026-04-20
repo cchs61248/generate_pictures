@@ -43,6 +43,8 @@ type Props = {
 }
 
 const STYLE_PROFILE_LIMIT = 5
+/** 設定頁成功／狀態提示顯示時間（ms） */
+const SETTINGS_FLASH_MS = 5000
 const STYLE_HISTORY_TYPE_LABELS: Record<string, string> = {
   rollback: "回滾",
   queue_restore: "恢復到待萃取",
@@ -187,6 +189,18 @@ function SettingsPageComponent({
   const [renamingProfileId, setRenamingProfileId] = useState<string | null>(null)
   const [renameInput, setRenameInput] = useState("")
   const prevStyleExtractPendingRef = useRef(styleExtractPending)
+
+  useEffect(() => {
+    if (!savedOk) return
+    const id = window.setTimeout(() => setSavedOk(false), SETTINGS_FLASH_MS)
+    return () => window.clearTimeout(id)
+  }, [savedOk])
+
+  useEffect(() => {
+    if (styleMsg == null || styleMsg === "") return
+    const id = window.setTimeout(() => setStyleMsg(null), SETTINGS_FLASH_MS)
+    return () => window.clearTimeout(id)
+  }, [styleMsg])
 
   const load = useCallback(async () => {
     setError(null)
@@ -520,42 +534,49 @@ function SettingsPageComponent({
   return (
     <div className="settings-page">
       <div className="settings-page-inner">
-        <div className="settings-page-intro">
-          <h2 className="settings-page-title">設定與說明</h2>
-          <div className="settings-tabs">
-            <button
-              type="button"
-              className={`settings-tab-btn ${activeTab === "env" ? "settings-tab-btn--active" : ""}`}
-              onClick={() => {
-                setActiveTab("env")
-                onTabChange?.("env")
-              }}
-            >
-              環境變數
-            </button>
-            <button
-              type="button"
-              className={`settings-tab-btn ${activeTab === "style" ? "settings-tab-btn--active" : ""}`}
-              onClick={() => {
-                setActiveTab("style")
-                onTabChange?.("style")
-              }}
-            >
-              AI 電商圖文助手 風格學習
-            </button>
+        <div className="settings-page-sticky-head">
+          <div className="settings-page-intro">
+            <h2 className="settings-page-title">設定與說明</h2>
+            <div className="settings-tabs">
+              <button
+                type="button"
+                className={`settings-tab-btn ${activeTab === "env" ? "settings-tab-btn--active" : ""}`}
+                onClick={() => {
+                  setActiveTab("env")
+                  onTabChange?.("env")
+                }}
+              >
+                環境變數
+              </button>
+              <button
+                type="button"
+                className={`settings-tab-btn ${activeTab === "style" ? "settings-tab-btn--active" : ""}`}
+                onClick={() => {
+                  setActiveTab("style")
+                  onTabChange?.("style")
+                }}
+              >
+                AI 電商圖文助手 風格學習
+              </button>
+            </div>
           </div>
-        </div>
 
-        {error ? (
-          <div className="settings-page-error" role="alert">
-            {error}
-          </div>
-        ) : null}
-        {savedOk ? (
-          <div className="settings-page-success" role="status">
-            已儲存並套用。
-          </div>
-        ) : null}
+          {error ? (
+            <div className="settings-page-error" role="alert">
+              {error}
+            </div>
+          ) : null}
+          {savedOk ? (
+            <div className="settings-page-success" role="status">
+              已儲存並套用。
+            </div>
+          ) : null}
+          {activeTab === "style" && styleMsg ? (
+            <div className="settings-page-success" role="status">
+              {styleMsg}
+            </div>
+          ) : null}
+        </div>
 
         {activeTab === "env" ? (
           <>
@@ -665,11 +686,6 @@ function SettingsPageComponent({
             <p className="settings-env-desc">
               手動執行萃取會以 Queue 內容，並同時參考目前使用中的工具風格偏好，產生下一版偏好。
             </p>
-            {styleMsg ? (
-              <div className="settings-page-success" role="status">
-                {styleMsg}
-              </div>
-            ) : null}
             <div className="settings-page-actions">
               <button
                 type="button"
