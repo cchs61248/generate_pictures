@@ -4,28 +4,62 @@
   box-sizing: border-box;
 }
 
-/* 科技感 SaaS：深淵底＋賽博藍／霓虹紫權杖 */
+/* 日系可愛風：粉灰畫布、馬卡龍色光、卡片偏冷白帶一點粉 */
 :root {
-  --bg-base: #0b0f19;
-  --bg-elevated: #151b2e;
-  --bg-elevated-2: #1c2540;
-  --bg-surface: #252a3d;
-  --bg-menu: #1e2438;
-  --text-primary: #e8eef5;
-  --text-muted: #a0aab5;
-  --accent-cyan: #00f0ff;
-  --accent-cyan-rgb: 0, 240, 255;
-  --accent-purple: #b026ff;
-  --accent-purple-rgb: 176, 38, 255;
-  --link-accent: #7ee8ff;
-  --border-subtle: rgba(255, 255, 255, 0.08);
-  --border-medium: rgba(255, 255, 255, 0.12);
-  --glass-bg: rgba(255, 255, 255, 0.045);
-  --glass-blur: 12px;
-  --focus-ring-cyan: 0 0 0 1px rgba(var(--accent-cyan-rgb), 0.45),
-    0 0 16px rgba(var(--accent-cyan-rgb), 0.2);
-  --shadow-dropdown: 0 4px 24px rgba(0, 0, 0, 0.45),
-    0 0 0 1px rgba(var(--accent-cyan-rgb), 0.06);
+  /* 作為 fallback；實際底色由 body 多層漸層構成 */
+  --bg-base: #e5dce2;
+  --bg-card: #f3e9ef;
+  --bg-elevated: #f7eef3;
+  --bg-elevated-2: #ebdfe6;
+  --bg-surface: #e4d6de;
+  --bg-menu: #f6edf2;
+
+  --text-primary: #4a3b32;
+  --text-body: #333333;
+  --text-heading: #2c3e50;
+  --text-muted: #8d8177;
+  --text-caption: #7f8c8d;
+
+  --primary: #a7d7c5;
+  --primary-rgb: 167, 215, 197;
+  --primary-pressed: #8bcbb4;
+  --accent-peach: #f8c3cd;
+  --accent-peach-rgb: 248, 195, 205;
+  --accent-cream: #fceb9c;
+  --accent-cream-rgb: 252, 235, 156;
+
+  /* 沿用舊變數名，對應新主題（減少 App.css 改動量） */
+  --accent-cyan: #a7d7c5;
+  --accent-cyan-rgb: 167, 215, 197;
+  --accent-purple: #f8c3cd;
+  --accent-purple-rgb: 248, 195, 205;
+  --link-accent: #2a9d8f;
+
+  --border-subtle: rgba(74, 59, 50, 0.1);
+  --border-medium: rgba(74, 59, 50, 0.14);
+
+  --glass-bg: rgba(243, 233, 239, 0.9);
+  --glass-blur: 16px;
+
+  --focus-ring-cyan: 0 0 0 2px rgba(var(--primary-rgb), 0.5),
+    0 0 0 5px rgba(var(--primary-rgb), 0.12);
+
+  --shadow-soft: 0 10px 36px rgba(74, 59, 50, 0.08);
+  --shadow-card: 0 12px 40px rgba(74, 59, 50, 0.07),
+    0 0 0 1px rgba(74, 59, 50, 0.06);
+  --shadow-primary: 0 6px 22px rgba(var(--primary-rgb), 0.4);
+  --shadow-dropdown: 0 12px 36px rgba(74, 59, 50, 0.12),
+    0 0 0 1px var(--border-subtle);
+
+  --success: #2a9d8f;
+  --success-soft: rgba(42, 157, 143, 0.12);
+  --error: #e76f51;
+  --error-soft: rgba(231, 111, 81, 0.12);
+
+  --radius-card: 24px;
+  --radius-pill: 999px;
+
+  color-scheme: light;
 }
 
 html,
@@ -37,32 +71,87 @@ body {
 
 body {
   background-color: var(--bg-base);
+  /* 由下到上：粉灰斜向底 → 色光 → 頂部亮部 → 極淡網點 */
   background-image:
     radial-gradient(
-      ellipse 100% 80% at 50% -25%,
-      rgba(var(--accent-cyan-rgb), 0.09),
+      rgba(110, 82, 96, 0.04) 0.9px,
+      transparent 0.9px
+    ),
+    radial-gradient(
+      rgba(110, 82, 96, 0.024) 0.5px,
+      transparent 0.5px
+    ),
+    radial-gradient(
+      ellipse 95% 75% at 50% -18%,
+      rgba(246, 236, 242, 0.72),
+      transparent 62%
+    ),
+    radial-gradient(
+      ellipse 72% 58% at 96% 6%,
+      rgba(var(--accent-peach-rgb), 0.28),
+      transparent 58%
+    ),
+    radial-gradient(
+      ellipse 68% 52% at 4% 10%,
+      rgba(var(--accent-cream-rgb), 0.26),
+      transparent 54%
+    ),
+    radial-gradient(
+      ellipse 58% 48% at 88% 94%,
+      rgba(var(--primary-rgb), 0.22),
+      transparent 52%
+    ),
+    radial-gradient(
+      ellipse 62% 50% at 8% 88%,
+      rgba(var(--accent-peach-rgb), 0.16),
+      transparent 50%
+    ),
+    radial-gradient(
+      ellipse 55% 45% at 50% 108%,
+      rgba(var(--primary-rgb), 0.12),
       transparent 55%
     ),
-    radial-gradient(
-      ellipse 55% 45% at 100% 15%,
-      rgba(var(--accent-purple-rgb), 0.07),
-      transparent 50%
-    ),
-    radial-gradient(
-      ellipse 70% 60% at 0% 90%,
-      rgba(20, 60, 100, 0.2),
-      transparent 50%
+    linear-gradient(
+      152deg,
+      #e8d9e1 0%,
+      #dfced8 26%,
+      #e2d4dc 52%,
+      #d9c7d1 78%,
+      #dccdd6 100%
     );
-  color: var(--text-primary);
+  background-size:
+    22px 22px,
+    11px 11px,
+    100% 100%,
+    100% 100%,
+    100% 100%,
+    100% 100%,
+    100% 100%,
+    100% 100%,
+    100% 100%;
+  background-repeat:
+    repeat,
+    repeat,
+    no-repeat,
+    no-repeat,
+    no-repeat,
+    no-repeat,
+    no-repeat,
+    no-repeat,
+    no-repeat;
+  color: var(--text-body);
   font-family:
+    "Nunito",
+    "Noto Sans TC",
     system-ui,
     -apple-system,
     "Segoe UI",
     Roboto,
-    "Noto Sans TC",
     "Helvetica Neue",
     Arial,
     sans-serif;
+  font-size: 16px;
+  line-height: 1.6;
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
 }

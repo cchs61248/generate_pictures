@@ -7,6 +7,7 @@ import {
 import type { ChatMessage } from "../api"
 import { getToolById } from "../tools"
 import { MessageBubble } from "./Message"
+import { WelcomeMascot } from "./WelcomeMascot"
 
 /** 與下方「新 assistant 內容」偵測邏輯一致；用於還原捲動後同步 ref，避免誤觸捲到底 */
 function assistantMessagesSignature(messages: ChatMessage[]): string {
@@ -270,14 +271,19 @@ export function ChatWindow({
               )
             }
             const tool = toolId ? getToolById(toolId) : undefined
+            const emptyLead =
+              tool?.id === "ecommerce-image"
+                ? "把商品圖交給我，馬上變出魔法！✨"
+                : tool
+                  ? `歡迎使用 ${tool.chatTitle}`
+                  : "把商品圖交給我，馬上變出魔法！✨"
             return (
               <div className="chat-empty">
-                {tool ? (
-                  <p className="chat-empty-tool-icon" aria-hidden>{tool.icon}</p>
-                ) : null}
+                <WelcomeMascot className="chat-empty-mascot" />
                 <p className="chat-empty-title">
                   {tool ? tool.chatTitle : "AI 電商圖文助手"}
                 </p>
+                <p className="chat-empty-lead">{emptyLead}</p>
                 <p className="chat-empty-hint">
                   {tool
                     ? tool.description

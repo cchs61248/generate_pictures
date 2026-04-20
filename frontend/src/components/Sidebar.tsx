@@ -6,8 +6,24 @@ import {
   useRef,
   useState,
 } from "react"
+import {
+  ChartBar,
+  Gear,
+  MagnifyingGlass,
+  ShoppingBag,
+  Sparkle,
+} from "@phosphor-icons/react"
 import type { ChatSession } from "../types/chatSession"
 import { TOOLS } from "../tools"
+
+const iconDuotone = { weight: "duotone" as const }
+
+function ToolGlyph({ toolId, size = 20 }: { toolId: string; size?: number }) {
+  if (toolId === "ecommerce-image") {
+    return <ShoppingBag {...iconDuotone} size={size} aria-hidden />
+  }
+  return <Sparkle {...iconDuotone} size={size} aria-hidden />
+}
 
 type Props = {
   sessions: ChatSession[]
@@ -201,7 +217,7 @@ export function Sidebar({
         <div className="sidebar-top">
           <label className="sidebar-search-wrap">
             <span className="sidebar-search-icon" aria-hidden>
-              🔍
+              <MagnifyingGlass {...iconDuotone} size={18} />
             </span>
             <input
               type="search"
@@ -223,7 +239,9 @@ export function Sidebar({
             onClick={() => setToolsExpanded((v) => !v)}
           >
             <span className="sidebar-gem-header-left">
-              <span className="sidebar-gem-icon" aria-hidden>✦</span>
+              <span className="sidebar-gem-icon" aria-hidden>
+                <Sparkle {...iconDuotone} size={18} />
+              </span>
               <span className="sidebar-gem-label">Tools</span>
             </span>
             <span
@@ -245,7 +263,7 @@ export function Sidebar({
                     onClick={() => handleToolClick(tool.id)}
                   >
                     <span className="sidebar-gem-item-icon" aria-hidden>
-                      {tool.icon}
+                      <ToolGlyph toolId={tool.id} size={22} />
                     </span>
                     <span className="sidebar-gem-item-name">{tool.name}</span>
                   </button>
@@ -338,7 +356,7 @@ export function Sidebar({
                     ) : null}
                     {s.toolId ? (
                       <span className="sidebar-chat-tool-badge" aria-hidden>
-                        {TOOLS.find((t) => t.id === s.toolId)?.icon ?? "✦"}
+                        <ToolGlyph toolId={s.toolId} size={18} />
                       </span>
                     ) : null}
                     <span className="sidebar-chat-title">{s.title}</span>
@@ -480,7 +498,7 @@ export function Sidebar({
           aria-current={tokenUsageActive ? "page" : undefined}
         >
           <span className="sidebar-settings-icon" aria-hidden>
-            📊
+            <ChartBar {...iconDuotone} size={22} />
           </span>
           <span>Token 用量</span>
         </button>
@@ -491,7 +509,7 @@ export function Sidebar({
           aria-current={settingsActive ? "page" : undefined}
         >
           <span className="sidebar-settings-icon" aria-hidden>
-            ⚙
+            <Gear {...iconDuotone} size={22} />
           </span>
           <span>設定與說明</span>
         </button>

@@ -322,7 +322,7 @@ export function TokenUsagePage({
   }, null)
 
   return (
-    <div className="settings-page">
+    <div className="settings-page settings-page--readable">
       <div className="settings-page-inner">
         <div className="settings-page-intro">
           <h2 className="settings-page-title">Token 用量</h2>

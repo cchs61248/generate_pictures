@@ -523,7 +523,7 @@ function SettingsPageComponent({
 
   if (loading) {
     return (
-      <div className="settings-page">
+      <div className="settings-page settings-page--readable">
         <div className="settings-page-inner">
           <p className="settings-page-hint">載入設定中…</p>
         </div>
@@ -532,11 +532,10 @@ function SettingsPageComponent({
   }
 
   return (
-    <div className="settings-page">
+    <div className="settings-page settings-page--readable">
       <div className="settings-page-inner">
         <div className="settings-page-sticky-head">
           <div className="settings-page-intro">
-            <h2 className="settings-page-title">設定與說明</h2>
             <div className="settings-tabs">
               <button
                 type="button"
