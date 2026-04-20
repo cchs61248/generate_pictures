@@ -10,14 +10,14 @@ import threading
 from datetime import datetime, timezone
 
 from core.app_logging import get_backend_logger
+from core.config import resolve_project_root
 
 _lock = threading.Lock()
 logger = get_backend_logger("token_logger")
 
 
 def _data_dir() -> str:
-    root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-    return os.path.join(root, "data")
+    return os.path.join(resolve_project_root(), "data")
 
 
 def _usage_file() -> str:

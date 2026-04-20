@@ -103,6 +103,14 @@ ENV_VARS_HIDDEN_FROM_SETTINGS_UI: frozenset[str] = frozenset(
 )
 
 
+def resolve_project_root() -> str:
+    """專案資料根目錄。若設定 APP_RUNTIME_ROOT（如 PaaS 掛載 volume），則使用該路徑。"""
+    runtime_root = (os.environ.get("APP_RUNTIME_ROOT") or "").strip()
+    if runtime_root:
+        return os.path.abspath(runtime_root)
+    return os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+
+
 @dataclass
 class AppConfig:
     project_root: str
@@ -203,12 +211,7 @@ def parse_config(stage3_only_flag: bool) -> AppConfig:
         or stage3_only_flag
     )
 
-    runtime_root = (os.environ.get("APP_RUNTIME_ROOT") or "").strip()
-    project_root = (
-        os.path.abspath(runtime_root)
-        if runtime_root
-        else os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-    )
+    project_root = resolve_project_root()
     sample_image_path = os.path.join(project_root, "sample.jpg")
     final_output_path = os.path.join(project_root, "final_output.json")
     picture_dir = os.path.join(project_root, "picture")

@@ -14,6 +14,7 @@ from fastapi import HTTPException
 from fastapi.responses import StreamingResponse
 
 from core.app_logging import get_backend_logger
+from core.config import resolve_project_root
 
 logger = get_backend_logger("deps")
 
@@ -31,11 +32,8 @@ def log_extra(session_id: str | None = None, request_id: str | None = None) -> d
 
 
 def project_root() -> str:
-    """回傳專案根目錄絕對路徑（api/ 的上層）。"""
-    runtime_root = os.environ.get("APP_RUNTIME_ROOT", "").strip()
-    if runtime_root:
-        return os.path.abspath(runtime_root)
-    return os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    """回傳專案根目錄絕對路徑（api/ 的上層）；與 parse_config、token 紀錄共用 APP_RUNTIME_ROOT 規則。"""
+    return resolve_project_root()
 
 
 def safe_session_id(session_id: str | None) -> str | None:
