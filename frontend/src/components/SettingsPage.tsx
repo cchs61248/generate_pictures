@@ -48,6 +48,7 @@ const SETTINGS_FLASH_MS = 5000
 const STYLE_HISTORY_TYPE_LABELS: Record<string, string> = {
   rollback: "回滾",
   queue_restore: "恢復到待萃取",
+  queue_delete: "刪除 queue",
   extract: "萃取",
   profile_delete: "刪除偏好",
   profile_rename: "偏好改名",
@@ -123,6 +124,8 @@ function styleHistoryActionText(item: StyleLearningHistoryItem): string {
   const newName = String(item.new_name ?? "").trim()
   const restoredCountRaw = Number(item.restored_count ?? item.restored ?? 0)
   const restoredCount = Number.isFinite(restoredCountRaw) ? restoredCountRaw : 0
+  const deletedCountRaw = Number(item.deleted_count ?? item.deleted ?? 0)
+  const deletedCount = Number.isFinite(deletedCountRaw) ? deletedCountRaw : 0
 
   if (typeRaw === "profile_delete") {
     return deletedProfileName
@@ -142,6 +145,11 @@ function styleHistoryActionText(item: StyleLearningHistoryItem): string {
     if (restoredCount <= 0) return "恢復 queue 到待萃取"
     if (restoredCount === 1) return "恢復一條 queue 到待萃取"
     return `恢復 ${restoredCount} 條 queue 到待萃取`
+  }
+  if (typeRaw === "queue_delete") {
+    if (deletedCount <= 0) return "刪除 queue"
+    if (deletedCount === 1) return "刪除 1 條 queue"
+    return `刪除 ${deletedCount} 條 queue`
   }
   if (typeRaw === "extract") {
     return profileName ? `萃取完成「${profileName}」` : "執行萃取"
