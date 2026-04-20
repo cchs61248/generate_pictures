@@ -402,6 +402,11 @@ export default function App() {
     setStyleExtractPendingState(next)
   }, [])
   const styleExtractPollPrevPendingRef = useRef<number | null>(null)
+  /** 與 styleDefaultProfileId 搭配：偵測 none→有效 id、或後端預設 uuid 換版，以同步尚未發話的電商主對話 */
+  const prevEffectiveDefaultStyleProfileIdRef = useRef<string>("none")
+  const prevStyleDefaultProfileIdFromServerRef = useRef<string | undefined>(
+    undefined,
+  )
 
   /* 舊版曾用 sessionStorage；遷移到與聊天狀態共用的 localStorage 後仍讀一次以免升級當下狀態遺失 */
   useEffect(() => {
@@ -1071,29 +1076,67 @@ export default function App() {
   }, [styleExtractPending, setStyleExtractPending])
 
   useEffect(() => {
-    if (effectiveDefaultStyleProfileId === "none") return
-    setPendingToolSession((p) => {
-      if (!p) return p
-      if ((p.selectedStyleProfileId ?? "none") !== "none") return p
-      if (p.messages.length > 0) return p
-      return {
-        ...p,
-        selectedStyleProfileId: effectiveDefaultStyleProfileId,
-        updatedAt: Date.now(),
+    const prevEff = prevEffectiveDefaultStyleProfileIdRef.current
+    const prevDef = prevStyleDefaultProfileIdFromServerRef.current
+
+    if (effectiveDefaultStyleProfileId !== "none") {
+      const shouldSyncPending = (sid: string | undefined) => {
+        const cur = sid ?? "none"
+        // 尚未載入風格列表前建立的暫存對話常為 "none"，載入後改為工具預設（已 commit 的 none 視為明確「不使用」）
+        if (prevEff === "none" && cur === "none") return true
+        if (
+          prevDef !== undefined &&
+          prevDef !== "none" &&
+          cur === prevDef
+        ) {
+          return true
+        }
+        return false
       }
-    })
-    setSessions((prev) =>
-      prev.map((s) => {
-        if ((s.selectedStyleProfileId ?? "none") !== "none") return s
-        if (s.messages.length > 0) return s
+      const shouldSyncCommitted = (sid: string | undefined) => {
+        const cur = sid ?? "none"
+        if (
+          prevDef !== undefined &&
+          prevDef !== "none" &&
+          cur === prevDef
+        ) {
+          return true
+        }
+        return false
+      }
+
+      setPendingToolSession((p) => {
+        if (!p || p.toolId !== "ecommerce-image") return p
+        if (p.messages.length > 0) return p
+        if (!shouldSyncPending(p.selectedStyleProfileId)) return p
         return {
-          ...s,
+          ...p,
           selectedStyleProfileId: effectiveDefaultStyleProfileId,
           updatedAt: Date.now(),
         }
-      }),
-    )
-  }, [effectiveDefaultStyleProfileId, setSessions])
+      })
+      setSessions((prev) =>
+        prev.map((s) => {
+          if (s.toolId !== "ecommerce-image" || s.parentId) return s
+          if (s.messages.length > 0) return s
+          if (!shouldSyncCommitted(s.selectedStyleProfileId)) return s
+          return {
+            ...s,
+            selectedStyleProfileId: effectiveDefaultStyleProfileId,
+            updatedAt: Date.now(),
+          }
+        }),
+      )
+    }
+
+    prevEffectiveDefaultStyleProfileIdRef.current =
+      effectiveDefaultStyleProfileId
+    prevStyleDefaultProfileIdFromServerRef.current = styleDefaultProfileId
+  }, [
+    effectiveDefaultStyleProfileId,
+    styleDefaultProfileId,
+    setSessions,
+  ])
 
   useEffect(() => {
     const handleStorage = (ev: StorageEvent) => {
