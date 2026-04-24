@@ -7,7 +7,7 @@ Token 用量紀錄模組
 import json
 import os
 import threading
-from datetime import datetime, timezone
+from datetime import datetime
 
 from core.app_logging import get_backend_logger
 from core.config import resolve_project_root
@@ -40,7 +40,7 @@ def log_token_usage(
         output_tokens: 輸出 token 數
     """
     record = {
-        "timestamp": datetime.now(timezone.utc).isoformat(),
+        "timestamp": datetime.now().isoformat(),
         "model": model,
         "source": source,
         "input_tokens": input_tokens,
