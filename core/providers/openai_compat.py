@@ -60,6 +60,38 @@ _OPENAI_TOOL_SCHEMAS = [
 ]
 
 
+def _usage_tokens(usage: Any | None) -> tuple[int, int]:
+    """
+    從 OpenAI SDK usage 物件取出 (input_tokens, output_tokens)。
+    相容 Chat Completions（prompt/completion）與 Responses（input/output）欄位。
+    """
+    if usage is None:
+        return 0, 0
+    if isinstance(usage, dict):
+        input_tokens = (
+            usage.get("input_tokens")
+            or usage.get("prompt_tokens")
+            or 0
+        )
+        output_tokens = (
+            usage.get("output_tokens")
+            or usage.get("completion_tokens")
+            or 0
+        )
+        return int(input_tokens or 0), int(output_tokens or 0)
+    input_tokens = (
+        getattr(usage, "input_tokens", None)
+        or getattr(usage, "prompt_tokens", None)
+        or 0
+    )
+    output_tokens = (
+        getattr(usage, "output_tokens", None)
+        or getattr(usage, "completion_tokens", None)
+        or 0
+    )
+    return int(input_tokens or 0), int(output_tokens or 0)
+
+
 def _openai_client(api_key: str, base_url: str | None):
     from openai import OpenAI
     kwargs: dict[str, Any] = {"api_key": api_key}
@@ -134,6 +166,25 @@ def _extract_request_id(obj: Any) -> str | None:
     return None
 
 
+def _friendly_image_error(exc: Exception, model: str) -> str:
+    """
+    將 OpenAI 圖片 API 例外轉成較可讀、可行動的錯誤訊息。
+    """
+    raw = str(exc or "")
+    lower = raw.lower()
+    if (
+        "must be verified" in lower
+        and "organization" in lower
+        and ("gpt-image-2" in lower or model == "gpt-image-2")
+    ):
+        return (
+            "OpenAI 帳號目前尚未完成 Organization Verification，暫時無法使用 gpt-image-2。"
+            "請到 OpenAI 平台完成組織驗證（可能需等待約 15 分鐘生效），"
+            "或先在設定頁把 IMAGE_MODEL 改為 gpt-image-1.5。"
+        )
+    return raw
+
+
 class OpenAITextProvider(TextProvider):
     def __init__(self, api_key: str, base_url: str | None = None) -> None:
         self._api_key = api_key
@@ -181,9 +232,9 @@ class OpenAITextProvider(TextProvider):
         while True:
             response = await asyncio.to_thread(_call)
             usage = getattr(response, "usage", None)
-            if usage:
-                total_input += getattr(usage, "prompt_tokens", 0) or 0
-                total_output += getattr(usage, "completion_tokens", 0) or 0
+            req_input, req_output = _usage_tokens(usage)
+            total_input += req_input
+            total_output += req_output
 
             choice = response.choices[0]
             finish_reason = getattr(choice, "finish_reason", None)
@@ -232,11 +283,12 @@ class OpenAITextProvider(TextProvider):
         client = self._client()
         response = await asyncio.to_thread(client.chat.completions.create, **kwargs)
         usage = getattr(response, "usage", None)
+        input_tokens, output_tokens = _usage_tokens(usage)
         text = response.choices[0].message.content or ""
         return TextResult(
             text=text,
-            input_tokens=getattr(usage, "prompt_tokens", 0) or 0 if usage else 0,
-            output_tokens=getattr(usage, "completion_tokens", 0) or 0 if usage else 0,
+            input_tokens=input_tokens,
+            output_tokens=output_tokens,
         )
 
 
@@ -304,7 +356,7 @@ class OpenAIImageProvider(ImageProvider):
                     _extract_request_id(exc) or "(none)",
                     str(exc),
                 )
-                raise
+                raise RuntimeError(_friendly_image_error(exc, model)) from exc
         else:
             quality = "hd" if image_size in ("2K", "4K") else "standard"
 
@@ -317,11 +369,26 @@ class OpenAIImageProvider(ImageProvider):
                     response_format="b64_json",
                 )
 
-            response = await asyncio.to_thread(_generate)
+            try:
+                response = await asyncio.to_thread(_generate)
+            except Exception as exc:
+                logger.warning(
+                    "[openai_compat] images.generate error | model=%s request_id=%s err=%s",
+                    model,
+                    _extract_request_id(exc) or "(none)",
+                    str(exc),
+                )
+                raise RuntimeError(_friendly_image_error(exc, model)) from exc
 
         b64 = response.data[0].b64_json
         image_bytes = base64.b64decode(b64)
-        return ImageResult(image_bytes=image_bytes)
+        usage = getattr(response, "usage", None)
+        input_tokens, output_tokens = _usage_tokens(usage)
+        return ImageResult(
+            image_bytes=image_bytes,
+            input_tokens=input_tokens,
+            output_tokens=output_tokens,
+        )
 
     async def edit_image(
         self,
@@ -369,10 +436,11 @@ class OpenAIImageProvider(ImageProvider):
         output = getattr(response, "output", None) or []
         result_text, result_image_bytes, call_id = _parse_responses_output(output)
         usage = getattr(response, "usage", None)
+        input_tokens, output_tokens = _usage_tokens(usage)
         return EditResult(
             text=result_text,
             image_bytes=result_image_bytes,
-            input_tokens=getattr(usage, "input_tokens", 0) or 0 if usage else 0,
-            output_tokens=getattr(usage, "output_tokens", 0) or 0 if usage else 0,
+            input_tokens=input_tokens,
+            output_tokens=output_tokens,
             provider_state={"image_call_id": call_id} if call_id else None,
         )

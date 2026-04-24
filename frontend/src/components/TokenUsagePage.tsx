@@ -56,9 +56,12 @@ function sourceLabel(source: string): string {
 }
 
 /**
- * 官方定價（付費層級・標準方案，每 100 萬 token 的美元費率）
- * 資料來源：https://ai.google.dev/gemini-api/docs/pricing（2026-04-09）
- * 圖片生成模型的 output 費率以圖片 token 費率為準（遠高於文字 token）。
+ * 官方定價（標準方案，每 100 萬 token 的美元費率）
+ * 資料來源：
+ * - Gemini：https://ai.google.dev/gemini-api/docs/pricing（2026-04-09）
+ * - OpenAI：https://openai.com/api/pricing/（2026-04-24）
+ * - OpenAI GPT Image 1.5：https://developers.openai.com/api/docs/models/gpt-image-1.5（2026-04-24）
+ * 備註：圖片模型使用 image token 單價；若模型未列入下方清單則顯示「—」。
  */
 type ModelPricing = {
   inputPer1M: number
@@ -84,6 +87,16 @@ const MODEL_PRICING: Record<string, ModelPricing> = {
   "gemini-3-pro-image-preview": { inputPer1M: 2.00, outputPer1M: 120.00 },
   // Nano Banana (gemini-2.5-flash-image)：$0.30 input / $30 output per 1M tokens（圖片 token）
   "gemini-2.5-flash-image": { inputPer1M: 0.30, outputPer1M: 30.00 },
+  // ── OpenAI 文字模型 ──────────────────────────────────────────
+  // GPT-5.4：$2.50 input / $15.00 output per 1M tokens
+  "gpt-5.4": { inputPer1M: 2.50, outputPer1M: 15.00 },
+  // GPT-5.4 mini：$0.75 input / $4.50 output per 1M tokens
+  "gpt-5.4-mini": { inputPer1M: 0.75, outputPer1M: 4.50 },
+  // ── OpenAI 圖片模型（以 image token 計）──────────────────────
+  // GPT-image-2（image tokens）：$8.00 input / $30.00 output per 1M tokens
+  "gpt-image-2": { inputPer1M: 8.00, outputPer1M: 30.00 },
+  // GPT-image-1.5（image tokens）：$8.00 input / $32.00 output per 1M tokens
+  "gpt-image-1.5": { inputPer1M: 8.00, outputPer1M: 32.00 },
 }
 
 function estimateCost(model: string, inputTokens: number, outputTokens: number): number | null {
@@ -327,8 +340,8 @@ export function TokenUsagePage({
         <div className="settings-page-intro">
           <h2 className="settings-page-title">Token 用量</h2>
           <p className="settings-page-lead">
-            顯示各 Gemini API 呼叫的 Token 消耗與估計費用（僅 API key 模式有數據）。
-            費用依 Google Gemini Developer API 付費方案標準定價估算，圖片模型的輸出以圖片 token 費率計算。
+            顯示各 LLM API 呼叫的 Token 消耗與估計費用（僅 API key 模式有數據）。
+            費用依 Gemini 與 OpenAI 官網標準定價估算，圖片模型的輸出以圖片 token 費率計算。
           </p>
         </div>
 
