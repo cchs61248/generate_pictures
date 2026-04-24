@@ -3,7 +3,7 @@
 以 **Google Gemini** 為核心的電商圖片生成平台。
 前端為 React 多工具聊天介面，後端為 FastAPI，業務邏輯依工具分層組織。
 
-目前已上線工具：**AI 電商圖文助手** — 上傳商品圖片與描述，自動生成 P1~P9 共 9 款電商風格圖。
+目前已上線工具：**AI 電商圖文助手** — 上傳商品圖與描述（可附 txt/pdf/docx/md 說明文件），自動生成 P1~P9 共 9 款電商風格圖。
 
 ---
 
@@ -22,15 +22,14 @@
 
 | 變數 | 說明 |
 |------|------|
-| `GOOGLE_API_KEY` | Gemini API 金鑰（apikey / hybrid 模式） |
-| `GEMINI_BACKEND` | `apikey`（預設）/ `hybrid` / `webapi` |
-| `TAVILY_API_KEY` | 網路搜尋金鑰（階段一用，選填） |
-| `TEXT_MODEL` | 文字模型（留空用預設） |
-| `IMAGE_MODEL` | 圖像模型（留空用預設） |
-| `GEMINI_COOKIE_1PSID` | webapi / hybrid 模式的瀏覽器 Cookie |
-| `GEMINI_COOKIE_1PSIDTS` | webapi / hybrid 模式的瀏覽器 Cookie |
+| `GOOGLE_API_KEY` | Gemini API 金鑰（必填） |
+| `TAVILY_API_KEY` | 網路搜尋金鑰（階段一用，選填；未填則跳過搜尋） |
+| `MAX_LLM_SEARCH_CALLS` | 階段一最多搜尋次數（0–9，預設 3） |
+| `TEXT_MODEL` | 文字模型代碼（留空用預設） |
+| `IMAGE_MODEL` | 圖像模型代碼（留空用預設） |
+| `IMAGE_OUTPUT_SIZE` | 產圖解析度：`512` / `1K` / `2K` / `4K`（預設 `1K`） |
 
-前端環境變數：`frontend/.env`（複製自 `frontend/.env.example`）
+前端環境變數：`frontend/.env`
 
 | 變數 | 說明 |
 |------|------|
@@ -78,14 +77,13 @@ python -m uvicorn api.server:app --host 0.0.0.0 --port $PORT
 
 #### Backend 必填環境變數
 
-- `GOOGLE_API_KEY` 或 `GEMINI_API_KEY`
-- `GEMINI_BACKEND`（建議 `apikey` 或 `hybrid`）
-- `TAVILY_API_KEY`（若你要啟用搜尋）
+- `GOOGLE_API_KEY`
+- `TAVILY_API_KEY`（若要啟用搜尋）
 - 其他你現有 `.env` 需要的變數
 
 #### Backend 持久化（重要）
 
-本專案會寫入 `uploads/`、`picture/`、`template_json/`、`data/`。  
+本專案會寫入 `uploads/`、`picture/`、`template_json/`、`data/`。
 請在 Railway Backend Service 掛一個 Volume（例如掛載點：`/data`），並設定：
 
 - `APP_RUNTIME_ROOT=/data`
@@ -107,7 +105,7 @@ Frontend 需要設定：
 
 ### 3) CORS 與連線檢查
 
-目前後端 CORS 為 `allow_origins=["*"]`，可直接從 Railway 前端網域呼叫。  
+目前後端 CORS 為 `allow_origins=["*"]`，可直接從 Railway 前端網域呼叫。
 部署後建議先做 smoke test：
 
 1. 開啟 frontend 網址
@@ -188,46 +186,57 @@ gnerate_pictures/
 ├── requirements.txt
 │
 ├── core/                     通用基礎設施
-│   ├── config.py             env 管理、AppConfig、模型清單
-│   ├── clients.py            組 Gemini API / Web client
-│   ├── gemini_web_client.py  Gemini 網頁版 HTTP 協定層
-│   └── progress.py           SSE 進度匯流排（ProgressBus）
+│   ├── config.py             env 管理、AppConfig、模型清單、.env 讀寫
+│   ├── clients.py            組 Gemini API 用戶端
+│   ├── progress.py           SSE 進度匯流排（ProgressBus）
+│   ├── app_logging.py        後端與前端日誌記錄
+│   └── token_logger.py       Token 使用量記錄
 │
 ├── services/                 通用服務
 │   ├── web_search.py         Tavily / DuckDuckGo 搜尋與網頁抓取
-│   └── image_gen.py          影像 API 呼叫與重試
+│   ├── image_gen.py          影像 API 呼叫與重試
+│   └── document_reader.py   由路徑抽取文件純文字（txt/pdf/docx/md）
 │
 ├── api/                      HTTP 層
 │   ├── server.py             FastAPI app、CORS、router 掛載
-│   ├── deps.py               跨 router 共用 helper
+│   ├── deps.py               跨 router 共用 helper（含 SSE 包裝器）
 │   └── routers/
 │       ├── session.py        GET/PUT /session-state
 │       ├── settings.py       GET/PUT /settings/env
-│       ├── media.py          圖片上傳/下載/刪除
+│       ├── media.py          圖片/文件上傳、下載、刪除
+│       ├── token_usage.py    GET /token-usage
+│       ├── frontend_log.py   POST /frontend-log
 │       └── tools/
 │           └── ecommerce_image/           AI 電商圖文助手
-│               ├── router.py              POST /run、/run-stream
+│               ├── router.py              POST /run、/run-stream 等
 │               ├── pipeline.py            三階段主流程編排
 │               ├── stages/
-│               │   ├── stage1_gather.py   商品資訊蒐集
-│               │   ├── stage2_json.py     P1~P9 JSON 產生
+│               │   ├── stage1_gather.py   商品資訊蒐集（LLM + 搜尋）
+│               │   ├── stage2_json.py     P1~P9 JSON 腳本產生
 │               │   └── stage3_image.py    批次圖片生成
 │               ├── prompts/
-│               │   ├── json_schema.py     P1~P9 結構化 prompt
+│               │   ├── json_schema.py     P1~P9 結構化 prompt 模板
 │               │   └── image_style.py     電商視覺風格 prompt
 │               ├── services/
-│               │   └── image_process.py   prompt 組合
+│               │   ├── image_process.py   prompt 組合與檔名安全化
+│               │   ├── style_learning.py  風格學習 queue/profile/history 管理
+│               │   └── run_job.py         背景任務：與 HTTP 解耦、事件持久化與重播
 │               ├── utils/
 │               │   └── json_utils.py      JSON 驗證、修復、EXPECTED_MAINS
-│               └── image_thread/          圖片子討論串（子 session）
-│                   ├── router.py          POST /image-thread/init、/chat/image-thread
-│                   └── service.py         子討論串記憶讀寫
+│               ├── image_thread/          圖片子討論串（子 session）
+│               │   ├── router.py          POST /image-thread/init、/chat/image-thread
+│               │   ├── service.py         子討論串記憶讀寫
+│               │   └── image_thread_job.py 背景任務與事件佇列
+│               └── style_learning/        風格學習管理子路由
+│                   └── router.py          style-learning 狀態、queue、extract 等
 │
 └── frontend/                 Vite + React + TypeScript
     └── src/
         ├── tools.ts          工具定義清單（TOOLS 陣列）
         ├── api.ts            所有 HTTP/SSE 呼叫集中於此
         ├── chatStorage.ts    localStorage 持久化
+        ├── types/
+        │   └── chatSession.ts  ChatSession 型別定義
         └── components/       ChatWindow、Sidebar、InputBar 等
 ```
 
@@ -239,16 +248,29 @@ gnerate_pictures/
 |------|------|------|
 | GET/PUT | `/session-state` | 前端 session 狀態持久化 |
 | GET/PUT | `/settings/env` | .env 讀寫與模型選項 |
-| POST | `/upload-image` | 上傳參考商品圖 |
+| POST | `/upload-image` | 上傳參考商品圖 → `uploads/<session_id>.jpg` |
 | GET | `/sample-reference` | 取得目前 session 參考圖 |
+| POST | `/upload-document` | 上傳附件（txt/pdf/doc/docx/md） |
 | DELETE | `/session-upload/{session_id}` | 清除 session 所有資源 |
 | DELETE | `/session-upload/{session_id}/image` | 僅清除上傳圖 |
+| DELETE | `/session-upload/{session_id}/document/{filename}` | 刪除單一文件 |
+| DELETE | `/session-upload/{session_id}/documents` | 刪除該 session 全部文件 |
 | POST | `/session-upload/from-picture` | 將生成圖設為 session 參考圖 |
-| GET | `/images/{filename}` | 取得 picture/ 生成圖 |
+| GET | `/images/{filename}` | 取得 `picture/` 生成圖 |
 | POST | `/run` | 同步執行電商圖文生成 |
-| POST | `/run-stream` | SSE 串流執行電商圖文生成 |
+| POST | `/run-stream` | SSE 串流執行電商圖文生成（背景任務，斷線不中止） |
+| GET | `/run-stream/subscribe` | 重連訂閱既有 run 事件（`?session_id=&from_seq=`） |
+| GET | `/run/status` | 取得 session 電商任務狀態 |
+| GET | `/run/awaiting-plan` | 若任務停在「待選圖」，回傳 plan_ready items |
+| POST | `/run/cancel` | 取消進行中背景 pipeline |
 | POST | `/image-thread/init` | 初始化圖片子討論串 |
 | POST | `/chat/image-thread` | SSE 子討論串圖片修改 |
+| GET | `/token-usage` | 取得 Token 用量（可加 `?start=YYYY-MM-DD&end=YYYY-MM-DD`） |
+| POST | `/frontend-log` | 接收前端日誌 |
+| GET | `/tools/ecommerce-image/style-learning/status` | 風格學習狀態 |
+| GET | `/tools/ecommerce-image/style-learning/queue` | 分頁查詢學習事件佇列 |
+| POST | `/tools/ecommerce-image/style-learning/extract` | 由 pending 事件萃取新 profile |
+| POST | `/tools/ecommerce-image/style-learning/rollback` | 切換預設 profile |
 
 ---
 
@@ -266,11 +288,11 @@ gnerate_pictures/
 
 ## 新增工具
 
-1. 在 `api/routers/tools/` 下新建 `<tool_name>/` 目錄
+1. 在 `api/routers/tools/` 下新建 `<tool_name>/` 目錄（結構參照 `ecommerce_image`）
 2. 建立 `router.py`，在 `api/server.py` 加一行 `app.include_router(...)`
 3. 在 `frontend/src/tools.ts` 的 `TOOLS` 陣列新增一筆 `ToolDefinition`
 
-工具業務邏輯完全自給自足於工具目錄內；共用能力透過 `from core.xxx` 引用。
+工具業務邏輯完全自給自足於工具目錄內；共用能力透過 `from core.xxx` / `from services.xxx` 引用。
 
 ---
 
@@ -279,17 +301,14 @@ gnerate_pictures/
 | 目錄/檔案 | 用途 |
 |-----------|------|
 | `picture/` | 圖片生成輸出（`P01_*.png` ~ `P09_*.png`） |
-| `uploads/` | 上傳參考圖暫存（`<session_id>.jpg`） |
+| `uploads/` | 參考圖（`<sid>.jpg`）與文件附件（`<sid>_doc_*`） |
 | `template_json/` | `final_output_<session_id>.json` |
 | `data/session_state.json` | 前端 session 狀態持久化 |
 | `data/image_thread_history_*.json` | 子討論串記憶 |
+| `data/token_usage.json` | Token 用量紀錄 |
+| `data/run_job_ecommerce_image_<sid>.json` | 電商主流程背景任務事件紀錄 |
+| `data/style_learning_queue_ecommerce_image.json` | 風格學習事件佇列 |
+| `data/style_profile_ecommerce_image.json` | 風格偏好 profile（含 default） |
+| `data/style_profile_ecommerce_image_versions.json` | 風格學習操作歷史 |
+| `log/` | 系統與前端日誌檔案 |
 | `.env` | 環境變數（含 API 金鑰，勿提交） |
-
----
-
-## 注意事項
-
-- 請先啟動後端，再啟動前端
-- `GOOGLE_API_KEY` 必填，未設定將無法執行
-- 使用 `webapi` 或 `hybrid` 模式需要有效的瀏覽器 Cookie
-- uvicorn `--reload` 模式下若刪除目錄後需重啟伺服器

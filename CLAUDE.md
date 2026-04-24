@@ -1,6 +1,6 @@
-# CLAUDE.md — 專案持久指令
+# CLAUDE.md
 
-> 本檔案讓 Claude Code 在每次對話開始時自動載入專案架構、開發慣例與重要規則。
+This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
 ---
 
@@ -47,6 +47,7 @@ api/
     settings.py     GET/PUT /settings/env
     media.py        圖片／文件上傳、下載、刪除、session 資源清理
     token_usage.py  GET /token-usage
+    frontend_log.py POST /frontend-log
     tools/
       <工具名>/ 工具專屬業務邏輯（自給自足）
         router.py
@@ -67,6 +68,7 @@ api/
 | `core/clients.py` | 依 config 建立 Gemini API（`google.genai`）用戶端 |
 | `core/progress.py` | SSE 進度匯流排（`ProgressBus`） |
 | `core/token_logger.py` | `log_token_usage`、讀取 `data/token_usage.json`（thread-safe） |
+| `core/app_logging.py` | 後端與前端日誌記錄設定 |
 | `services/web_search.py` | Tavily / DuckDuckGo 搜尋與網頁抓取 |
 | `services/image_gen.py` | 影像 API 呼叫與重試邏輯 |
 | `services/document_reader.py` | 由路徑抽取文件純文字（供輸入 LLM prompt，有長度截斷） |
@@ -85,8 +87,10 @@ api/
 | `services/image_process.py` | prompt 組合與檔名安全化 |
 | `services/style_learning.py` | 風格學習 queue/profile/history 管理、萃取與回滾 |
 | `utils/json_utils.py` | JSON 抽取、驗證（含 `EXPECTED_MAINS`）、LLM 修復 |
+| `services/run_job.py` | `/run-stream` 背景任務：與 HTTP 連線解耦、SSE 事件持久化（`data/run_job_ecommerce_image_<sid>.json`）、事件重播、任務取消 |
 | `image_thread/router.py` | `POST /image-thread/init`、`POST /chat/image-thread`（SSE）；token 紀錄 |
 | `image_thread/service.py` | image thread 歷史讀寫 |
+| `image_thread/image_thread_job.py` | image thread 背景任務與事件佇列管理 |
 | `style_learning/router.py` | style-learning 狀態、queue、extract、rollback、profile 管理 |
 
 ---
@@ -131,6 +135,7 @@ api/routers/tools/<new_tool>/
 | GET/PUT | `/session-state` | 前端 session 狀態持久化 |
 | GET/PUT | `/settings/env` | `.env` 讀寫與模型選項 |
 | GET | `/token-usage` | Token 用量列表；查詢參數 `start` / `end`（`YYYY-MM-DD`，可選） |
+| POST | `/frontend-log` | 接收前端日誌 |
 | POST | `/upload-image` | 上傳參考商品圖 → `uploads/<session_id>.jpg` |
 | GET | `/sample-reference` | 取得目前 session 參考圖 |
 | POST | `/upload-document` | 上傳附件（txt/pdf/doc/docx/md）→ `uploads/<sid>_doc_<uuid>.<ext>` |
@@ -141,7 +146,11 @@ api/routers/tools/<new_tool>/
 | POST | `/session-upload/from-picture` | 將 `picture/` 生成圖複製為 session 參考圖 |
 | GET | `/images/{filename}` | 取得 `picture/` 生成圖 |
 | POST | `/run` | 同步執行電商圖文生成 |
-| POST | `/run-stream` | SSE 串流執行電商圖文生成 |
+| POST | `/run-stream` | SSE 串流執行電商圖文生成（背景任務，斷線不中止） |
+| GET | `/run-stream/subscribe` | 重連訂閱既有 run 任務事件（`?session_id=&from_seq=`） |
+| GET | `/run/status` | 取得 session 電商任務狀態 |
+| GET | `/run/awaiting-plan` | 若任務停在「待選圖」，回傳 plan_ready items |
+| POST | `/run/cancel` | 取消進行中背景 pipeline |
 | POST | `/image-thread/init` | 初始化子討論串 |
 | POST | `/chat/image-thread` | SSE 子討論串圖片修改 |
 | GET | `/tools/ecommerce-image/style-learning/status` | 取得風格學習狀態（目前預設 profile、queue 統計） |
@@ -159,7 +168,8 @@ api/routers/tools/<new_tool>/
 ## 重要開發慣例
 
 - **`api/server.py` 不含業務邏輯**，只做 app 建立與 router 掛載（含 `ecommerce_image`、`image_thread`、`style_learning`）
-- **`api/deps.py`** 提供跨 router 共用函式，例如：`project_root`、`safe_session_id`、`readable_error`、`sample_image_path_for_session`、`require_session_upload_exists`、`apply_session_sample_path`、`doc_upload_path`、`load_session_document_texts`、`load_session_documents`、`safe_filename_part`、`sse_streaming_response`
+- **`api/deps.py`** 提供跨 router 共用函式，例如：`project_root`、`safe_session_id`、`readable_error`、`sample_image_path_for_session`、`require_session_upload_exists`、`apply_session_sample_path`、`doc_upload_path`、`load_session_document_texts`、`load_session_documents`、`safe_filename_part`、`sse_streaming_response`、`sse_streaming_detached`
+- **SSE 兩種包裝器**：`sse_streaming_response(generator_func, request)` — 客戶端斷線時取消背景任務；`sse_streaming_detached(event_source, request)` — 客戶端斷線時**不**取消，任務持續執行（電商主流程使用後者）
 - **工具業務邏輯自給自足**，只透過 `from core.xxx`、`from services.xxx` 引用通用層，不跨工具互相引用
 - **`EXPECTED_MAINS`**（P1~P9 欄位清單）定義在工具層 `utils/json_utils.py`，不在 `core/config.py`
 - **SSE 串流**統一使用 `deps.py` 的 `sse_streaming_response(runner_fn, request)` 包裝
@@ -184,5 +194,7 @@ api/routers/tools/<new_tool>/
 | `data/style_learning_queue_ecommerce_image.json` | 風格學習事件佇列（pending/extracted） |
 | `data/style_profile_ecommerce_image.json` | 工具級風格偏好 profile（含 default） |
 | `data/style_profile_ecommerce_image_versions.json` | 風格學習操作歷史（extract/rollback/rename/delete） |
-| `.env` | 環境變數（含 API 金鑰） |
+| `data/run_job_ecommerce_image_<sid>.json` | 電商主流程背景任務事件紀錄（由 `run_job.py` 原子寫入） |
+| `log/` | 系統與前端日誌檔案 |
+| `.env` | 環境變數（含 API 金鑰）；`APP_RUNTIME_ROOT` 可覆寫根目錄（PaaS / 外掛 volume 部署用） |
 

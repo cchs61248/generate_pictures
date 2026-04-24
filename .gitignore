@@ -68,3 +68,4 @@ data/session_state.json
 cookies.json
 *.spec
 log/
+agent_history.jsonl
