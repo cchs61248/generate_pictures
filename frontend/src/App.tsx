@@ -1680,6 +1680,7 @@ export default function App() {
             isRunning: false,
             cancelRequestedAt: undefined,
             streamPrimed: false,
+            clearOnNextSend: true,
             updatedAt: Date.now(),
             awaitingStage3Selection: stillSelecting,
           }
@@ -2079,6 +2080,11 @@ export default function App() {
           error: true,
         },
       ])
+      patchSession(sessionId, (s) => ({
+        ...s,
+        clearOnNextSend: true,
+        updatedAt: Date.now(),
+      }))
     } finally {
       if (runControllersRef.current.get(sessionId) === aborter) {
         runControllersRef.current.delete(sessionId)
@@ -2231,6 +2237,11 @@ export default function App() {
             error: true,
           },
         ])
+        patchSession(sid, (s) => ({
+          ...s,
+          clearOnNextSend: true,
+          updatedAt: Date.now(),
+        }))
       } finally {
         if (subscribed) {
           if (runControllersRef.current.get(sid) === aborter) {
