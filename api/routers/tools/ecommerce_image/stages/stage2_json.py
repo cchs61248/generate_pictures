@@ -79,12 +79,14 @@ async def generate_json_plan(
         selected_style_profile_id or "(default)",
         len(gathered_info or ""),
     )
+    model_name = get_text_model()
     if progress:
         await progress.emit(
             {
                 "type": "collapsible_init",
                 "group_id": GROUP_STAGE2_META,
                 "title": "階段二 · 圖片腳本產生",
+                "model": model_name,
             }
         )
         await progress.emit(
@@ -92,6 +94,7 @@ async def generate_json_plan(
                 "type": "collapsible_line",
                 "group_id": GROUP_STAGE2_META,
                 "line": "[階段二] 正在結合 json_schema 規範，生成最終的 AI 繪圖提示詞與文案...",
+                "model": model_name,
             }
         )
 
@@ -132,7 +135,7 @@ async def generate_json_plan(
         ContentItem(type="image_pil", pil_image=image),
     ]
     result = await text_provider.generate_text(
-        model=get_text_model(),
+        model=model_name,
         system=stage2_system_instruction,
         user_content=user_content,
         temperature=0.0,
@@ -145,7 +148,7 @@ async def generate_json_plan(
     )
     try:
         log_token_usage(
-            model=get_text_model(),
+            model=model_name,
             source="stage2_json",
             input_tokens=result.input_tokens,
             output_tokens=result.output_tokens,
@@ -172,6 +175,7 @@ async def generate_json_plan(
                         "type": "collapsible_line",
                         "group_id": GROUP_STAGE2_META,
                         "line": msg,
+                        "model": model_name,
                     }
                 )
     except Exception as exc:
@@ -183,6 +187,7 @@ async def generate_json_plan(
                     "type": "collapsible_line",
                     "group_id": GROUP_STAGE2_META,
                     "line": msg,
+                    "model": model_name,
                 }
             )
 
@@ -195,6 +200,7 @@ async def generate_json_plan(
                     "type": "collapsible_line",
                     "group_id": GROUP_STAGE2_META,
                     "line": line,
+                    "model": model_name,
                 }
             )
         logger.info("[stage2] repair path | api_key")
@@ -222,6 +228,7 @@ async def generate_json_plan(
                 "type": "collapsible_line",
                 "group_id": GROUP_STAGE2_META,
                 "line": f"💾 [JSON 已儲存] {output_json_path}",
+                "model": model_name,
             }
         )
         markdown_plan = _format_final_data_markdown(final_data)
@@ -230,6 +237,7 @@ async def generate_json_plan(
                 "type": "text_block",
                 "format": "markdown",
                 "content": f"🤖 **[圖片腳本]**\n\n{markdown_plan}",
+                "model": model_name,
             }
         )
     logger.info("[stage2] exit generate_json_plan")

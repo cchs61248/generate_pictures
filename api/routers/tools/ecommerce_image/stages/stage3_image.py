@@ -47,6 +47,7 @@ async def generate_all_images(
         selected_style_profile_id or "(default)",
     )
     os.makedirs(picture_dir, exist_ok=True)
+    model_name = get_image_model()
 
     saved_files: list[str] = []
     for item in final_data:
@@ -72,13 +73,14 @@ async def generate_all_images(
                     "type": "collapsible_init",
                     "group_id": group_id,
                     "title": title,
+                    "model": model_name,
                 }
             )
 
         try:
             style_instruction = resolve_picture_style_template(selected_style_profile_id)
             img_result = await image_provider.generate_image(
-                model=get_image_model(),
+                model=model_name,
                 prompt=image_prompt,
                 reference_image_pil=image,
                 style_instruction=style_instruction,
@@ -92,7 +94,7 @@ async def generate_all_images(
             )
             try:
                 log_token_usage(
-                    model=get_image_model(),
+                    model=model_name,
                     source="stage3_image",
                     input_tokens=img_result.input_tokens,
                     output_tokens=img_result.output_tokens,
@@ -116,6 +118,7 @@ async def generate_all_images(
                         "type": "collapsible_line",
                         "group_id": group_id,
                         "line": ok_line.strip(),
+                        "model": model_name,
                     }
                 )
                 # 讓前端每張圖完成就立刻新增「文字+圖片」泡泡
@@ -125,6 +128,7 @@ async def generate_all_images(
                         "sort": int(sort_num),
                         "main": str(main_name),
                         "saved_file": file_path,
+                        "model": model_name,
                     }
                 )
             saved_files.append(file_path)
@@ -138,6 +142,7 @@ async def generate_all_images(
                         "type": "collapsible_line",
                         "group_id": group_id,
                         "line": err.strip(),
+                        "model": model_name,
                     }
                 )
     if saved_files:
@@ -148,7 +153,14 @@ async def generate_all_images(
         logger.warning(done_msg)
     # 階段三收尾訊息仍用文字泡泡，避免依附在某張圖的折疊泡泡內
     if progress:
-        await progress.emit({"type": "text_block", "format": "plain", "content": done_msg})
+        await progress.emit(
+            {
+                "type": "text_block",
+                "format": "plain",
+                "content": done_msg,
+                "model": model_name,
+            }
+        )
 
     logger.info("[stage3] exit generate_all_images | saved=%d", len(saved_files))
     return saved_files

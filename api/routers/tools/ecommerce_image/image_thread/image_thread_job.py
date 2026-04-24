@@ -170,7 +170,7 @@ async def _image_thread_generate_async(
     latest_image_abs: str,
     previous_provider_state: dict | None,
     cancel_event: threading.Event | None = None,
-) -> tuple[str, str | None, dict | None]:
+) -> tuple[str, str | None, dict | None, str]:
     from PIL import Image
 
     if cancel_event and cancel_event.is_set():
@@ -254,7 +254,7 @@ async def _image_thread_generate_async(
         len(edit_result.text),
         saved_filename or "",
     )
-    return edit_result.text, saved_filename, edit_result.provider_state
+    return edit_result.text, saved_filename, edit_result.provider_state, model_name
 
 
 class ImageThreadJob:
@@ -387,7 +387,7 @@ class ImageThreadJob:
                 current_entries = load_image_thread_history(self.root, self.sid)
                 prev_state = latest_provider_state_from_entries(current_entries)
 
-                result_text, saved_filename, new_provider_state = await _image_thread_generate_async(
+                result_text, saved_filename, new_provider_state, model_name = await _image_thread_generate_async(
                     self.root,
                     self.sid,
                     self.user_text,
@@ -435,6 +435,7 @@ class ImageThreadJob:
                         "type": "complete",
                         "text": result_text or "",
                         "saved_image": saved_filename,
+                        "model": model_name,
                     }
                 )
             except asyncio.CancelledError:

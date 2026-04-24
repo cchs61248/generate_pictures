@@ -1358,10 +1358,11 @@
 .msg-label--assistant {
   display: block;
   font-size: 0.65rem;
-  text-transform: uppercase;
-  letter-spacing: 0.08em;
+  letter-spacing: 0.04em;
   opacity: 0.5;
   margin-bottom: 0.35rem;
+  white-space: normal;
+  word-break: break-all;
 }
 
 .msg-text {

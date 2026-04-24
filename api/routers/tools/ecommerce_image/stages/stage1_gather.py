@@ -55,12 +55,14 @@ async def gather_product_info(
         selected_style_profile_id or "(default)",
     )
     ctx_token = None
+    model_name = get_text_model()
     if progress:
         await progress.emit(
             {
                 "type": "collapsible_init",
                 "group_id": GROUP_STAGE1_TOOLS,
                 "title": "階段一 · 工具與系統提示",
+                "model": model_name,
             }
         )
         await progress.emit(
@@ -68,6 +70,7 @@ async def gather_product_info(
                 "type": "collapsible_line",
                 "group_id": GROUP_STAGE1_TOOLS,
                 "line": "[階段一] 正在分析圖片與聯網收集商品資訊，請稍候...",
+                "model": model_name,
             }
         )
         ctx_token = progress_cv.set(progress)
@@ -116,6 +119,7 @@ async def gather_product_info(
                         "type": "collapsible_line",
                         "group_id": GROUP_STAGE1_TOOLS,
                         "line": line,
+                        "model": model_name,
                     }
                 )
         doc_sections = []
@@ -197,7 +201,7 @@ async def gather_product_info(
             ContentItem(type="image_pil", pil_image=image),
         ]
         result = await text_provider.chat_with_tools(
-            model=get_text_model(),
+            model=model_name,
             system=stage1_system_instruction,
             user_content=user_content,
             tool_fns=[bounded_search, fetch_webpage],
@@ -210,7 +214,7 @@ async def gather_product_info(
         )
         try:
             log_token_usage(
-                model=get_text_model(),
+                model=model_name,
                 source="stage1_gather",
                 input_tokens=result.input_tokens,
                 output_tokens=result.output_tokens,
@@ -227,7 +231,12 @@ async def gather_product_info(
                 f"{gathered_info}"
             )
             await progress.emit(
-                {"type": "text_block", "format": "markdown", "content": md}
+                {
+                    "type": "text_block",
+                    "format": "markdown",
+                    "content": md,
+                    "model": model_name,
+                }
             )
         return gathered_info
     finally:

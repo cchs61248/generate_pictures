@@ -50,13 +50,21 @@ export type ChatMessage = {
   error?: boolean
   /** 選圖模式：九張腳本卡片 */
   planSelection?: PlanSelectionState
+  /** 這則 AI 訊息使用的模型（若可取得） */
+  responseModel?: string
 }
 
 export type StreamEvent =
-  | { type: "collapsible_init"; group_id: string; title: string }
-  | { type: "collapsible_line"; group_id: string; line: string }
-  | { type: "text_block"; format: string; content: string }
-  | { type: "image_saved"; sort: number; main: string; saved_file: string }
+  | { type: "collapsible_init"; group_id: string; title: string; model?: string }
+  | { type: "collapsible_line"; group_id: string; line: string; model?: string }
+  | { type: "text_block"; format: string; content: string; model?: string }
+  | {
+      type: "image_saved"
+      sort: number
+      main: string
+      saved_file: string
+      model?: string
+    }
   | { type: "plan_ready"; items: EcommercePlanItem[] }
   | {
       type: "complete"
@@ -338,6 +346,28 @@ export const FALLBACK_PROVIDER_MODEL_CHOICES: ProviderModelChoices = {
   },
 }
 
+/** 與設定頁模型下拉一致的顯示名稱（整合所有 provider 的 fallback 選項） */
+export const MODEL_LABEL_MAP: Record<string, string> = (() => {
+  const pairs: Array<[string, string]> = []
+  const pushOptions = (opts: ModelChoiceOption[] | undefined) => {
+    for (const opt of opts ?? []) {
+      pairs.push([opt.value, opt.label])
+    }
+  }
+  const groups = ["TEXT_MODEL", "IMAGE_MODEL"] as const
+  for (const group of groups) {
+    const byProvider = FALLBACK_PROVIDER_MODEL_CHOICES[group] ?? {}
+    for (const provider of Object.keys(byProvider)) {
+      pushOptions(byProvider[provider])
+    }
+  }
+  return Object.fromEntries(pairs)
+})()
+
+export function modelLabel(model: string): string {
+  return MODEL_LABEL_MAP[model] ?? model
+}
+
 /** 優先使用後端回傳的 modelChoices，缺漏或空陣列時用 FALLBACK_MODEL_CHOICES */
 export function resolveModelChoices(
   key: string,
@@ -455,7 +485,7 @@ export async function initImageThread(
 
 export type ImageThreadStreamEvent =
   | { type: "progress"; content: string }
-  | { type: "complete"; text: string; saved_image: string | null }
+  | { type: "complete"; text: string; saved_image: string | null; model?: string }
   | { type: "error"; detail: string }
 
 /** 呼叫 POST /chat/image-thread，逐筆解析 SSE data JSON */

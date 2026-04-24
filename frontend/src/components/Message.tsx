@@ -1,5 +1,6 @@
 import {
   type ChatMessage,
+  modelLabel,
   normalizeImageUrlForCurrentApi,
 } from "../api"
 import Markdown from "react-markdown"
@@ -28,6 +29,9 @@ export function MessageBubble({
   onPlanCancel,
 }: Props) {
   const isUser = message.role === "user"
+  const displayModel = message.responseModel
+    ? modelLabel(message.responseModel.trim())
+    : ""
 
   if (isUser) {
     const hasImage = Boolean(message.imagePreview)
@@ -99,7 +103,9 @@ export function MessageBubble({
       <div
         className={`msg-bubble msg-bubble--assistant ${message.error ? "msg-bubble--error" : ""}`}
       >
-        <span className="msg-label msg-label--assistant">AI</span>
+        <span className="msg-label msg-label--assistant">
+          AI{displayModel ? ` · ${displayModel}` : ""}
+        </span>
         {message.collapsible ? (
           <details className="msg-collapsible">
             <summary className="msg-collapsible-summary">

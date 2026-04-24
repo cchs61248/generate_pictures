@@ -1490,6 +1490,7 @@ export default function App() {
             text: replyText || (imageUrls.length ? "已完成圖片修改。" : "已處理完畢。"),
             textFormat: "plain" as const,
             generatedImages: imageUrls.length ? imageUrls : undefined,
+            responseModel: ev.model,
           },
         ])
         patchSession(sessionId, (s) => ({
@@ -1543,6 +1544,7 @@ export default function App() {
           {
             id: newId(),
             role: "assistant",
+            responseModel: ev.model,
             collapsible: {
               id: ev.group_id,
               title: ev.title,
@@ -1565,6 +1567,7 @@ export default function App() {
             if (!c) return msg
             return {
               ...msg,
+              responseModel: ev.model ?? msg.responseModel,
               collapsible: {
                 ...c,
                 lines: [...c.lines, ev.line],
@@ -1586,6 +1589,7 @@ export default function App() {
             role: "assistant",
             text: ev.content,
             textFormat: fmt,
+            responseModel: ev.model,
           },
         ])
         return
@@ -1601,6 +1605,7 @@ export default function App() {
             text: `**${label}** ${ev.main}`,
             textFormat: "markdown",
             generatedImages: urls,
+            responseModel: ev.model,
           },
         ])
         return
