@@ -68,8 +68,12 @@ def log_token_usage(
         else:
             records = []
         records.append(record)
-        with open(path, "w", encoding="utf-8") as f:
-            json.dump(records, f, ensure_ascii=False, indent=2)
+        try:
+            with open(path, "w", encoding="utf-8") as f:
+                json.dump(records, f, ensure_ascii=False, indent=2)
+        except Exception as write_exc:
+            logger.warning("[token_logger] write failed | %s", write_exc)
+            return
     logger.debug("[token_logger] append done | total_records=%d", len(records))
 
 

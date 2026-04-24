@@ -99,8 +99,8 @@ async def generate_all_images(
                     input_tokens=img_result.input_tokens,
                     output_tokens=img_result.output_tokens,
                 )
-            except Exception:
-                pass
+            except Exception as _tok_exc:
+                logger.warning("[stage3] log_token_usage failed | %s", _tok_exc)
             raw_image = Image.open(io.BytesIO(img_result.image_bytes))
             raw_image.load()
 

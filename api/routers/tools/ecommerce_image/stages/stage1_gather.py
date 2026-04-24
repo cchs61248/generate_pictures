@@ -219,8 +219,8 @@ async def gather_product_info(
                 input_tokens=result.input_tokens,
                 output_tokens=result.output_tokens,
             )
-        except Exception:
-            pass
+        except Exception as _tok_exc:
+            logger.warning("[stage1] log_token_usage failed | %s", _tok_exc)
         gathered_info = result.text
 
         logger.info("[stage1] completed gather_product_info | output_chars=%d", len(gathered_info))

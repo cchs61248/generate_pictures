@@ -228,8 +228,8 @@ async def _image_thread_generate_async(
             input_tokens=edit_result.input_tokens,
             output_tokens=edit_result.output_tokens,
         )
-    except Exception:
-        pass
+    except Exception as _tok_exc:
+        logger.warning("[image_thread] log_token_usage failed | %s", _tok_exc)
 
     saved_filename: str | None = None
     if edit_result.image_bytes:

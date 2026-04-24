@@ -153,8 +153,8 @@ async def generate_json_plan(
             input_tokens=result.input_tokens,
             output_tokens=result.output_tokens,
         )
-    except Exception:
-        pass
+    except Exception as _tok_exc:
+        logger.warning("[stage2] log_token_usage failed | %s", _tok_exc)
     raw_output = result.text or ""
     logger.info("[stage2] received model response | raw_chars=%d", len(raw_output))
     logger.debug("[stage2] raw output preview: %s", _preview_text(raw_output, 800))
