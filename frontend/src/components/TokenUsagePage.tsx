@@ -21,14 +21,19 @@ type Props = {
   onDateRangeChange?: (next: { start: string; end: string }) => void
 }
 
+function localDateStr(d: Date): string {
+  const pad = (n: number) => String(n).padStart(2, '0')
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`
+}
+
 function todayStr(): string {
-  return new Date().toISOString().slice(0, 10)
+  return localDateStr(new Date())
 }
 
 function firstDayOfMonthStr(): string {
   const d = new Date()
   d.setDate(1)
-  return d.toISOString().slice(0, 10)
+  return localDateStr(d)
 }
 
 /** 所有模型別名（TEXT + IMAGE 合併） */
