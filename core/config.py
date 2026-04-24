@@ -48,8 +48,8 @@ OPENAI_TEXT_MODEL_OPTIONS: tuple[ModelOption, ...] = (
 
 # OpenAI 圖像模型
 OPENAI_IMAGE_MODEL_OPTIONS: tuple[ModelOption, ...] = (
-    ModelOption("gpt-image-2", "GPT Image 2（新版 Edits）"),
-    ModelOption("gpt-image-1.5", "GPT Image 1.5（新版 Edits）"),
+    ModelOption("gpt-image-2", "GPT Image 2"),
+    ModelOption("gpt-image-1.5", "GPT Image 1.5"),
     ModelOption("gpt-image-1", "GPT Image 1"),
     ModelOption("gpt-image-1-mini", "GPT Image 1 Mini"),
 )

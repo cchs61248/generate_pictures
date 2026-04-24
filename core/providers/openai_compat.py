@@ -100,6 +100,14 @@ def _openai_client(api_key: str, base_url: str | None):
     return OpenAI(**kwargs)
 
 
+def _is_official_openai(base_url: str | None) -> bool:
+    """True 表示使用官方 OpenAI API，支援 developer role 與 Responses API instructions 參數。"""
+    if base_url is None:
+        return True
+    normalized = base_url.strip().rstrip("/")
+    return normalized in ("", "https://api.openai.com/v1")
+
+
 def _content_item_to_openai(item: ContentItem) -> dict:
     if item.type == "text":
         return {"type": "text", "text": item.text or ""}
@@ -213,8 +221,9 @@ class OpenAITextProvider(TextProvider):
             return f"未知工具：{name}"
 
         openai_user_content = [_content_item_to_openai(item) for item in user_content]
+        system_role = "developer" if _is_official_openai(self._base_url) else "system"
         messages: list[dict] = [
-            {"role": "system", "content": system},
+            {"role": system_role, "content": system},
             {"role": "user", "content": openai_user_content},
         ]
         client = self._client()
@@ -273,8 +282,9 @@ class OpenAITextProvider(TextProvider):
         json_mode: bool = False,
     ) -> TextResult:
         openai_user_content = [_content_item_to_openai(item) for item in user_content]
+        system_role = "developer" if _is_official_openai(self._base_url) else "system"
         messages = [
-            {"role": "system", "content": system},
+            {"role": system_role, "content": system},
             {"role": "user", "content": openai_user_content},
         ]
         kwargs: dict[str, Any] = {"model": model, "messages": messages, "temperature": temperature}
@@ -400,7 +410,15 @@ class OpenAIImageProvider(ImageProvider):
         previous_provider_state: dict | None = None,
     ) -> EditResult:
         client = self._client()
-        full_prompt = f"{style_instruction}\n\n{prompt}" if style_instruction else prompt
+        use_instructions = _is_official_openai(self._base_url)
+
+        # 官方 OpenAI：style_instruction 透過 instructions 頂層參數傳入，prompt 保持純粹。
+        # 自訂端點：instructions 參數不保證支援，改用字串拼接維持相容性。
+        if use_instructions:
+            first_turn_text = prompt
+        else:
+            full_prompt = f"{style_instruction}\n\n{prompt}" if style_instruction else prompt
+            first_turn_text = full_prompt
 
         if previous_provider_state and previous_provider_state.get("image_call_id"):
             input_payload: list = [
@@ -419,18 +437,21 @@ class OpenAIImageProvider(ImageProvider):
                 {
                     "role": "user",
                     "content": [
-                        {"type": "input_text", "text": full_prompt},
+                        {"type": "input_text", "text": first_turn_text},
                         {"type": "input_image", "image_url": f"data:image/jpeg;base64,{b64_ref}"},
                     ],
                 }
             ]
 
         def _create() -> Any:
-            return client.responses.create(
-                model=model,
-                input=input_payload,
-                tools=[{"type": "image_generation"}],
-            )
+            kwargs: dict[str, Any] = {
+                "model": model,
+                "input": input_payload,
+                "tools": [{"type": "image_generation"}],
+            }
+            if use_instructions and style_instruction:
+                kwargs["instructions"] = style_instruction
+            return client.responses.create(**kwargs)
 
         response = await asyncio.to_thread(_create)
         output = getattr(response, "output", None) or []

@@ -338,8 +338,8 @@ export const FALLBACK_PROVIDER_MODEL_CHOICES: ProviderModelChoices = {
   IMAGE_MODEL: {
     gemini: FALLBACK_MODEL_CHOICES.IMAGE_MODEL,
     openai: [
-      { value: "gpt-image-2", label: "GPT Image 2（新版 Edits）" },
-      { value: "gpt-image-1.5", label: "GPT Image 1.5（新版 Edits）" },
+      { value: "gpt-image-2", label: "GPT Image 2" },
+      { value: "gpt-image-1.5", label: "GPT Image 1.5" },
       { value: "gpt-image-1", label: "GPT Image 1" },
       { value: "gpt-image-1-mini", label: "GPT Image 1 Mini" },
     ],

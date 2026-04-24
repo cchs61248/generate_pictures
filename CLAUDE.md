@@ -64,8 +64,11 @@ api/
 
 | 檔案 | 職責 |
 |------|------|
-| `core/config.py` | env 管理、`AppConfig`、模型清單、`.env` 讀寫 |
-| `core/clients.py` | 依 config 建立 Gemini API（`google.genai`）用戶端 |
+| `core/config.py` | env 管理、`AppConfig`、模型清單（Gemini / OpenAI 兩套）、`.env` 讀寫；`get_text_provider()` / `get_image_provider()` 讀 `TEXT_PROVIDER` / `IMAGE_PROVIDER` 環境變數 |
+| `core/clients.py` | `build_clients(config, require_text, require_image) → ClientBundle`；依供應商設定選擇 Gemini 或 OpenAI，回傳含 `text_provider` / `image_provider` 的 `ClientBundle` |
+| `core/providers/base.py` | Provider 抽象基底：`TextProvider`（`chat_with_tools` / `generate_text`）、`ImageProvider`（`generate_image` / `edit_image`）；跨供應商統一的 `ContentItem`、`TextResult`、`ImageResult`、`EditResult` 資料類別 |
+| `core/providers/gemini.py` | `GeminiTextProvider` / `GeminiImageProvider`：封裝 `google.genai` SDK；圖片生成含 429 / resource_exhausted 自動重試 |
+| `core/providers/openai_compat.py` | `OpenAITextProvider` / `OpenAIImageProvider`：封裝 OpenAI SDK；支援 OpenAI 及任何 OpenAI-compatible API（Groq、OpenRouter、Ollama 等）；圖片修改使用 Responses API（`image_generation_call` 多輪狀態） |
 | `core/progress.py` | SSE 進度匯流排（`ProgressBus`） |
 | `core/token_logger.py` | `log_token_usage`、讀取 `data/token_usage.json`（thread-safe） |
 | `core/app_logging.py` | 後端與前端日誌記錄設定 |
@@ -167,6 +170,7 @@ api/routers/tools/<new_tool>/
 
 ## 重要開發慣例
 
+- **雙供應商架構**：`TEXT_PROVIDER` / `IMAGE_PROVIDER` 可分別設為 `gemini`（預設）或 `openai`；業務邏輯只呼叫 `TextProvider` / `ImageProvider` 介面，不直接引用 SDK。新增供應商在 `core/providers/` 實作後，於 `core/clients.py` 的 `build_clients()` 中登記即可
 - **`api/server.py` 不含業務邏輯**，只做 app 建立與 router 掛載（含 `ecommerce_image`、`image_thread`、`style_learning`）
 - **`api/deps.py`** 提供跨 router 共用函式，例如：`project_root`、`safe_session_id`、`readable_error`、`sample_image_path_for_session`、`require_session_upload_exists`、`apply_session_sample_path`、`doc_upload_path`、`load_session_document_texts`、`load_session_documents`、`safe_filename_part`、`sse_streaming_response`、`sse_streaming_detached`
 - **SSE 兩種包裝器**：`sse_streaming_response(generator_func, request)` — 客戶端斷線時取消背景任務；`sse_streaming_detached(event_source, request)` — 客戶端斷線時**不**取消，任務持續執行（電商主流程使用後者）
