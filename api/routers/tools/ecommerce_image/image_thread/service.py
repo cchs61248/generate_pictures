@@ -65,6 +65,16 @@ def delete_image_thread_history(root: str, session_id: str) -> bool:
     return False
 
 
+def latest_provider_state_from_entries(entries: list[dict]) -> dict | None:
+    """從 entries 末端找最近的 model entry，回傳其 provider_state（多輪 OpenAI 串接用）。"""
+    for entry in reversed(entries):
+        if entry.get("type") == "model":
+            state = entry.get("provider_state")
+            if isinstance(state, dict):
+                return state
+    return None
+
+
 def latest_image_path_from_entries(root: str, entries: list[dict]) -> str | None:
     """
     從記憶 entries 末端往前找最新的圖片絕對路徑。

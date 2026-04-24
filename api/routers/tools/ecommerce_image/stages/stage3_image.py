@@ -4,17 +4,17 @@
 遍歷 P1~P9 JSON 腳本，依序組合 prompt 並呼叫圖像模型，
 將生成結果 resize 至 1000×1000 後存入 picture/ 目錄。
 """
-import asyncio
 import io
 import os
 
 from PIL import Image
 
 from core.app_logging import get_backend_logger
-from core.config import get_image_model
+from core.config import get_image_model, get_image_output_size
 from core.progress import ProgressBus
+from core.providers.base import ImageProvider
 from core.token_logger import log_token_usage
-from services.image_gen import generate_image_with_retry
+from services.image_gen import resolve_picture_style_template
 
 from api.routers.tools.ecommerce_image.services.image_process import build_safe_name, compose_image_prompt
 
@@ -32,7 +32,7 @@ async def generate_all_images(
     final_data: list[dict],
     image,
     picture_dir: str,
-    genai_client,
+    image_provider: ImageProvider,
     session_id: str = "",
     progress: ProgressBus | None = None,
     selected_style_profile_id: str | None = None,
@@ -76,50 +76,31 @@ async def generate_all_images(
             )
 
         try:
-            raw_image = None
-            logger.debug("[stage3] P%02d image generation path=api_key", sort_num)
-            response = await asyncio.to_thread(
-                generate_image_with_retry,
-                genai_client,
-                image_prompt,
-                image,
-                selected_style_profile_id,
+            style_instruction = resolve_picture_style_template(selected_style_profile_id)
+            img_result = await image_provider.generate_image(
+                model=get_image_model(),
+                prompt=image_prompt,
+                reference_image_pil=image,
+                style_instruction=style_instruction,
+                image_size=get_image_output_size(),
             )
-            usage = getattr(response, "usage_metadata", None)
-            if usage is not None:
-                logger.debug(
-                    "[stage3] P%02d usage_metadata | prompt_tokens=%s output_tokens=%s",
-                    sort_num,
-                    getattr(usage, "prompt_token_count", 0) or 0,
-                    getattr(usage, "candidates_token_count", 0) or 0,
+            logger.debug(
+                "[stage3] P%02d usage | input_tokens=%s output_tokens=%s",
+                sort_num,
+                img_result.input_tokens,
+                img_result.output_tokens,
+            )
+            try:
+                log_token_usage(
+                    model=get_image_model(),
+                    source="stage3_image",
+                    input_tokens=img_result.input_tokens,
+                    output_tokens=img_result.output_tokens,
                 )
-                try:
-                    log_token_usage(
-                        model=get_image_model(),
-                        source="stage3_image",
-                        input_tokens=getattr(usage, "prompt_token_count", 0) or 0,
-                        output_tokens=getattr(usage, "candidates_token_count", 0) or 0,
-                    )
-                except Exception:
-                    pass
-            for part in response.parts:
-                if part.inline_data is not None:
-                    raw_image = Image.open(io.BytesIO(part.inline_data.data))
-                    raw_image.load()
-                    break
-
-            if raw_image is None:
-                w = f"  ⚠️  P{sort_num:02d} 未取得圖片內容，跳過。"
-                logger.warning(w)
-                if progress:
-                    await progress.emit(
-                        {
-                            "type": "collapsible_line",
-                            "group_id": group_id,
-                            "line": w.strip(),
-                        }
-                    )
-                continue
+            except Exception:
+                pass
+            raw_image = Image.open(io.BytesIO(img_result.image_bytes))
+            raw_image.load()
 
             resized = raw_image.resize((1000, 1000), Image.LANCZOS)
             sid_suffix = f"_{session_id}" if session_id else ""

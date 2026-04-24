@@ -296,7 +296,10 @@ export type ModelChoiceOption = {
   label: string
 }
 
-/** 與 core/config.py 的 TEXT_MODEL_OPTIONS／IMAGE_MODEL_OPTIONS 對齊；GET 未帶 modelChoices 時仍要能顯示下拉 */
+/** 依供應商分組的模型下拉選項：{ TEXT_MODEL: { gemini: [...], openai: [...] }, IMAGE_MODEL: {...} } */
+export type ProviderModelChoices = Record<string, Record<string, ModelChoiceOption[]>>
+
+/** 與 core/config.py 的 MODEL_OPTIONS 對齊；GET 未帶 modelChoices 時仍要能顯示下拉 */
 export const FALLBACK_MODEL_CHOICES: Record<string, ModelChoiceOption[]> = {
   TEXT_MODEL: [
     { value: "gemini-3-flash-preview", label: "Gemini 3 Flash" },
@@ -310,6 +313,29 @@ export const FALLBACK_MODEL_CHOICES: Record<string, ModelChoiceOption[]> = {
     { value: "gemini-3-pro-image-preview", label: "Nano Banana Pro" },
     { value: "gemini-2.5-flash-image", label: "Nano Banana" },
   ],
+}
+
+export const FALLBACK_PROVIDER_MODEL_CHOICES: ProviderModelChoices = {
+  TEXT_MODEL: {
+    gemini: FALLBACK_MODEL_CHOICES.TEXT_MODEL,
+    openai: [
+      { value: "gpt-5.4", label: "GPT-5.4" },
+      { value: "gpt-5.4-mini", label: "GPT-5.4 Mini" },
+      { value: "gpt-5.4-nano", label: "GPT-5.4 Nano" },
+      { value: "gpt-5.4-pro", label: "GPT-5.4 Pro" },
+      { value: "o4-mini", label: "o4 Mini" },
+      { value: "o3", label: "o3" },
+    ],
+  },
+  IMAGE_MODEL: {
+    gemini: FALLBACK_MODEL_CHOICES.IMAGE_MODEL,
+    openai: [
+      { value: "gpt-image-2", label: "GPT Image 2（新版 Edits）" },
+      { value: "gpt-image-1.5", label: "GPT Image 1.5（新版 Edits）" },
+      { value: "gpt-image-1", label: "GPT Image 1" },
+      { value: "gpt-image-1-mini", label: "GPT Image 1 Mini" },
+    ],
+  },
 }
 
 /** 優先使用後端回傳的 modelChoices，缺漏或空陣列時用 FALLBACK_MODEL_CHOICES */
@@ -326,8 +352,10 @@ export function resolveModelChoices(
 
 export type EnvSettingsResponse = {
   variables: EnvVariableRow[]
-  /** TEXT_MODEL、IMAGE_MODEL 等：官方 model 代碼與介面顯示名稱 */
+  /** 目前供應商的 TEXT_MODEL、IMAGE_MODEL 下拉選項 */
   modelChoices?: Record<string, ModelChoiceOption[]>
+  /** 所有供應商的模型選項（切換供應商時即時更新用） */
+  providerModelChoices?: ProviderModelChoices
 }
 
 export async function fetchEnvSettings(
@@ -351,7 +379,14 @@ export async function fetchEnvSettings(
     !Array.isArray(rawChoices)
       ? (rawChoices as Record<string, ModelChoiceOption[]>)
       : undefined
-  return { variables, modelChoices }
+  const rawProviderChoices = data.providerModelChoices
+  const providerModelChoices =
+    rawProviderChoices &&
+    typeof rawProviderChoices === "object" &&
+    !Array.isArray(rawProviderChoices)
+      ? (rawProviderChoices as ProviderModelChoices)
+      : undefined
+  return { variables, modelChoices, providerModelChoices }
 }
 
 export async function saveEnvSettings(

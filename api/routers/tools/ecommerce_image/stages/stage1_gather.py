@@ -7,13 +7,12 @@
 import asyncio
 import re
 
-from google.genai import types
-
 from api.deps import project_root
 from api.routers.tools.ecommerce_image.services.style_learning import get_style_prompt_by_id
 from core.app_logging import get_backend_logger
 from core.config import get_text_model
 from core.progress import GROUP_STAGE1_TOOLS, ProgressBus, progress_cv
+from core.providers.base import ContentItem, TextProvider
 from core.token_logger import log_token_usage
 from services.web_search import fetch_webpage, get_max_llm_search_calls, make_bounded_search_web
 
@@ -39,31 +38,11 @@ def _extract_urls(user_input: str) -> list[str]:
     return dedup_urls
 
 
-def _response_text_safe(response) -> str:
-    """避免直接讀 response.text 觸發 SDK non-text parts 警告。"""
-    candidates = getattr(response, "candidates", None)
-    if candidates:
-        text_parts: list[str] = []
-        for cand in candidates:
-            content = getattr(cand, "content", None)
-            parts = getattr(content, "parts", None) if content else None
-            if not parts:
-                continue
-            for part in parts:
-                text = getattr(part, "text", None)
-                if isinstance(text, str) and text:
-                    text_parts.append(text)
-        if text_parts:
-            return "\n".join(text_parts).strip()
-
-    text = getattr(response, "text", "")
-    return text or ""
-
 
 async def gather_product_info(
     user_input: str,
     image,
-    genai_client,
+    text_provider: TextProvider,
     doc_texts: list[str] | None = None,
     doc_filenames: list[str] | None = None,
     progress: ProgressBus | None = None,
@@ -211,42 +190,34 @@ async def gather_product_info(
     logger.debug("[stage1] prompt preview: %s", _preview_text(info_prompt, 600))
 
     try:
-        logger.info("[stage1] calling Gemini API chat tools flow")
+        logger.info("[stage1] calling text provider chat_with_tools flow")
         bounded_search = make_bounded_search_web()
-        info_chat = genai_client.chats.create(
+        user_content = [
+            ContentItem(type="text", text=info_prompt),
+            ContentItem(type="image_pil", pil_image=image),
+        ]
+        result = await text_provider.chat_with_tools(
             model=get_text_model(),
-            config=types.GenerateContentConfig(
-                tools=[bounded_search, fetch_webpage],
-                system_instruction=stage1_system_instruction,
-                automatic_function_calling=types.AutomaticFunctionCallingConfig(
-                    disable=False,
-                    # 搜尋最多 get_max_llm_search_calls() 次（見 make_bounded_search_web）；其餘額度給 fetch_webpage
-                    maximum_remote_calls=get_max_llm_search_calls() + 2,
-                ),
-            ),
+            system=stage1_system_instruction,
+            user_content=user_content,
+            tool_fns=[bounded_search, fetch_webpage],
+            max_tool_calls=get_max_llm_search_calls() + 2,
         )
-        # send_message 為同步長時間呼叫，須移出事件迴圈以免 SSE 進度無法即時推送
-        response = await asyncio.to_thread(
-            info_chat.send_message,
-            [info_prompt, image],
+        logger.debug(
+            "[stage1] usage | input_tokens=%s output_tokens=%s",
+            result.input_tokens,
+            result.output_tokens,
         )
-        usage = getattr(response, "usage_metadata", None)
-        if usage is not None:
-            logger.debug(
-                "[stage1] usage_metadata | prompt_tokens=%s output_tokens=%s",
-                getattr(usage, "prompt_token_count", 0) or 0,
-                getattr(usage, "candidates_token_count", 0) or 0,
+        try:
+            log_token_usage(
+                model=get_text_model(),
+                source="stage1_gather",
+                input_tokens=result.input_tokens,
+                output_tokens=result.output_tokens,
             )
-            try:
-                log_token_usage(
-                    model=get_text_model(),
-                    source="stage1_gather",
-                    input_tokens=getattr(usage, "prompt_token_count", 0) or 0,
-                    output_tokens=getattr(usage, "candidates_token_count", 0) or 0,
-                )
-            except Exception:
-                pass
-        gathered_info = _response_text_safe(response)
+        except Exception:
+            pass
+        gathered_info = result.text
 
         logger.info("[stage1] completed gather_product_info | output_chars=%d", len(gathered_info))
         logger.debug("[stage1] gathered info preview: %s", _preview_text(gathered_info, 800))

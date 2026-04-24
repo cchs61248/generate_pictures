@@ -4,14 +4,13 @@
 負責：
   - P1~P9 JSON 候選文字抽取
   - 嚴格格式驗證（9 筆、固定欄位、固定 main 值）
-  - LLM 二次修復（Gemini API）
+  - LLM 二次修復
 """
 import json
 import re
 
-from google.genai import types
-
 from core.config import get_text_model
+from core.providers.base import ContentItem, TextProvider
 from api.routers.tools.ecommerce_image.prompts.json_schema import prompt_template
 
 
@@ -37,6 +36,18 @@ def extract_json_candidate(text: str) -> str:
     if match:
         return match.group(0)
     return cleaned
+
+
+def coerce_plan_array(data: object) -> object:
+    """容錯：若模型回傳包一層物件，嘗試取出其中的 9 筆計畫陣列。"""
+    if isinstance(data, list):
+        return data
+    if isinstance(data, dict):
+        for key in ("items", "plans", "data", "result", "output"):
+            val = data.get(key)
+            if isinstance(val, list):
+                return val
+    return data
 
 
 def validate_output(data: object) -> tuple[bool, str]:
@@ -78,7 +89,7 @@ def validate_output(data: object) -> tuple[bool, str]:
     return True, ""
 
 
-def repair_to_json_apikey(genai_client, raw_text: str) -> list[dict]:
+async def repair_to_json_apikey(text_provider: TextProvider, raw_text: str) -> list[dict]:
     repair_prompt = f"""
 請把以下內容修復成「合法 JSON」，並且只輸出 JSON 陣列本體，不要有任何額外文字。
 必須符合：
@@ -90,12 +101,11 @@ def repair_to_json_apikey(genai_client, raw_text: str) -> list[dict]:
 以下是待修復原文：
 {raw_text}
 """
-    repaired = genai_client.models.generate_content(
+    result = await text_provider.generate_text(
         model=get_text_model(),
-        contents=repair_prompt,
-        config=types.GenerateContentConfig(
-            system_instruction=prompt_template,
-            temperature=0.0,
-        ),
+        system=prompt_template,
+        user_content=[ContentItem(type="text", text=repair_prompt)],
+        temperature=0.0,
+        json_mode=True,
     )
-    return json.loads(extract_json_candidate(repaired.text or ""))
+    return json.loads(extract_json_candidate(result.text or ""))

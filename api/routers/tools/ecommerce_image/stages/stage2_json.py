@@ -8,17 +8,17 @@ import asyncio
 import json
 import os
 
-from google.genai import types
-
 from api.deps import project_root
 from core.app_logging import get_backend_logger
 from core.config import get_text_model
 from core.progress import GROUP_STAGE2_META, ProgressBus
+from core.providers.base import ContentItem, TextProvider
 from core.token_logger import log_token_usage
 
 from api.routers.tools.ecommerce_image.prompts.json_schema import prompt_template
 from api.routers.tools.ecommerce_image.services.style_learning import get_style_prompt_by_id
 from api.routers.tools.ecommerce_image.utils.json_utils import (
+    coerce_plan_array,
     extract_json_candidate,
     repair_to_json_apikey,
     validate_output,
@@ -67,7 +67,7 @@ def _format_final_data_markdown(final_data: list[dict]) -> str:
 async def generate_json_plan(
     gathered_info: str,
     image,
-    genai_client,
+    text_provider: TextProvider,
     output_json_path: str,
     progress: ProgressBus | None = None,
     selected_style_profile_id: str | None = None,
@@ -126,41 +126,40 @@ async def generate_json_plan(
         _preview_text(stage2_system_instruction, 600),
     )
 
-    logger.info("[stage2] calling Gemini API model.generate_content")
-    response = await asyncio.to_thread(
-        genai_client.models.generate_content,
+    logger.info("[stage2] calling text provider generate_text")
+    user_content = [
+        ContentItem(type="text", text=format_prompt),
+        ContentItem(type="image_pil", pil_image=image),
+    ]
+    result = await text_provider.generate_text(
         model=get_text_model(),
-        contents=[format_prompt, image],
-        config=types.GenerateContentConfig(
-            system_instruction=stage2_system_instruction,
-            temperature=0.0,
-            response_mime_type="application/json",
-        ),
+        system=stage2_system_instruction,
+        user_content=user_content,
+        temperature=0.0,
+        json_mode=True,
     )
-    usage = getattr(response, "usage_metadata", None)
-    if usage is not None:
-        logger.debug(
-            "[stage2] usage_metadata | prompt_tokens=%s output_tokens=%s",
-            getattr(usage, "prompt_token_count", 0) or 0,
-            getattr(usage, "candidates_token_count", 0) or 0,
+    logger.debug(
+        "[stage2] usage | input_tokens=%s output_tokens=%s",
+        result.input_tokens,
+        result.output_tokens,
+    )
+    try:
+        log_token_usage(
+            model=get_text_model(),
+            source="stage2_json",
+            input_tokens=result.input_tokens,
+            output_tokens=result.output_tokens,
         )
-        try:
-            log_token_usage(
-                model=get_text_model(),
-                source="stage2_json",
-                input_tokens=getattr(usage, "prompt_token_count", 0) or 0,
-                output_tokens=getattr(usage, "candidates_token_count", 0) or 0,
-            )
-        except Exception:
-            pass
-    raw_output = response.text or ""
+    except Exception:
+        pass
+    raw_output = result.text or ""
     logger.info("[stage2] received model response | raw_chars=%d", len(raw_output))
     logger.debug("[stage2] raw output preview: %s", _preview_text(raw_output, 800))
 
     candidate = extract_json_candidate(raw_output)
     final_data = None
     try:
-        parsed = json.loads(candidate)
+        parsed = coerce_plan_array(json.loads(candidate))
         ok, reason = validate_output(parsed)
         if ok:
             final_data = parsed
@@ -199,9 +198,7 @@ async def generate_json_plan(
                 }
             )
         logger.info("[stage2] repair path | api_key")
-        repaired = await asyncio.to_thread(
-            repair_to_json_apikey, genai_client, raw_output
-        )
+        repaired = coerce_plan_array(await repair_to_json_apikey(text_provider, raw_output))
         ok, reason = validate_output(repaired)
         if not ok:
             raise ValueError(f"修復後仍不符合 JSON 規範：{reason}")

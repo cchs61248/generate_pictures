@@ -116,7 +116,7 @@ async def run_pipeline(
         gathered_info = await gather_product_info(
             user_input=user_input,
             image=image,
-            genai_client=clients.genai_client,
+            text_provider=clients.text_provider,
             doc_texts=doc_texts or [],
             doc_filenames=doc_filenames or [],
             progress=progress,
@@ -127,7 +127,7 @@ async def run_pipeline(
         final_data = await generate_json_plan(
             gathered_info=gathered_info,
             image=image,
-            genai_client=clients.genai_client,
+            text_provider=clients.text_provider,
             output_json_path=config.final_output_path,
             progress=progress,
             selected_style_profile_id=selected_style_profile_id,
@@ -150,7 +150,7 @@ async def run_pipeline(
         image=image,
         picture_dir=config.picture_dir,
         session_id=config.session_id,
-        genai_client=clients.genai_client,
+        image_provider=clients.image_provider,
         progress=progress,
         selected_style_profile_id=selected_style_profile_id,
     )

@@ -13,12 +13,17 @@ from api.deps import project_root
 from core.app_logging import get_backend_logger
 from core.config import (
     DEFAULT_IMAGE_MODEL,
+    DEFAULT_OPENAI_IMAGE_MODEL,
+    DEFAULT_OPENAI_TEXT_MODEL,
     DEFAULT_TEXT_MODEL,
     ENV_VARS_HIDDEN_FROM_SETTINGS_UI,
     IMAGE_MODEL_OPTIONS,
     MANAGED_ENV_KEYS,
     MANAGED_ENV_VARS,
+    PROVIDER_MODEL_CHOICES,
     TEXT_MODEL_OPTIONS,
+    get_image_provider,
+    get_text_provider,
     parse_env_file,
     sync_managed_env_from_dotenv,
     write_managed_env_file,
@@ -41,9 +46,11 @@ async def get_env_settings():
             continue
         val = (parsed.get(spec.key, "") or "").strip()
         if spec.key == "TEXT_MODEL":
-            val = val or DEFAULT_TEXT_MODEL
+            text_prov = (parsed.get("TEXT_PROVIDER") or "gemini").strip().lower()
+            val = val or (DEFAULT_OPENAI_TEXT_MODEL if text_prov == "openai" else DEFAULT_TEXT_MODEL)
         elif spec.key == "IMAGE_MODEL":
-            val = val or DEFAULT_IMAGE_MODEL
+            img_prov = (parsed.get("IMAGE_PROVIDER") or "gemini").strip().lower()
+            val = val or (DEFAULT_OPENAI_IMAGE_MODEL if img_prov == "openai" else DEFAULT_IMAGE_MODEL)
         variables.append(
             {
                 "key": spec.key,
@@ -51,15 +58,18 @@ async def get_env_settings():
                 "value": val,
             }
         )
+    # 目前供應商的模型下拉（給既有前端邏輯）
+    text_prov_cur = get_text_provider()
+    img_prov_cur = get_image_provider()
     model_choices = {
-        "TEXT_MODEL": [
-            {"value": o.official_id, "label": o.label_zh} for o in TEXT_MODEL_OPTIONS
-        ],
-        "IMAGE_MODEL": [
-            {"value": o.official_id, "label": o.label_zh} for o in IMAGE_MODEL_OPTIONS
-        ],
+        "TEXT_MODEL": PROVIDER_MODEL_CHOICES["TEXT_MODEL"].get(text_prov_cur, PROVIDER_MODEL_CHOICES["TEXT_MODEL"]["gemini"]),
+        "IMAGE_MODEL": PROVIDER_MODEL_CHOICES["IMAGE_MODEL"].get(img_prov_cur, PROVIDER_MODEL_CHOICES["IMAGE_MODEL"]["gemini"]),
     }
-    return {"variables": variables, "modelChoices": model_choices}
+    return {
+        "variables": variables,
+        "modelChoices": model_choices,
+        "providerModelChoices": PROVIDER_MODEL_CHOICES,
+    }
 
 
 @router.put("/settings/env")

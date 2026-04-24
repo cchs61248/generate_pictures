@@ -11,13 +11,13 @@ class ManagedEnvVar:
 
 @dataclass(frozen=True)
 class ModelOption:
-    """Gemini API 官方 model 字串 + 介面顯示名稱（與社群常用稱呼對齊）。"""
+    """API 官方 model 字串 + 介面顯示名稱（與社群常用稱呼對齊）。"""
 
     official_id: str
     label_zh: str
 
 
-# 階段一／二 等文字模型（值為 Google GenAI 官方 model 代碼）
+# 階段一／二 等文字模型（Gemini）
 TEXT_MODEL_OPTIONS: tuple[ModelOption, ...] = (
     ModelOption("gemini-3-flash-preview", "Gemini 3 Flash"),
     ModelOption("gemini-3.1-flash-lite-preview", "Gemini 3.1 Flash-Lite"),
@@ -26,7 +26,7 @@ TEXT_MODEL_OPTIONS: tuple[ModelOption, ...] = (
     ModelOption("gemini-2.5-pro", "Gemini 2.5 Pro"),
 )
 
-# 階段三 API 產圖（值為官方 model 代碼；Nano Banana 為文件用語）
+# 階段三 API 產圖（Gemini；Nano Banana 為文件用語）
 IMAGE_MODEL_OPTIONS: tuple[ModelOption, ...] = (
     ModelOption("gemini-3.1-flash-image-preview", "Nano Banana 2"),
     ModelOption("gemini-3-pro-image-preview", "Nano Banana Pro"),
@@ -36,20 +36,60 @@ IMAGE_MODEL_OPTIONS: tuple[ModelOption, ...] = (
 DEFAULT_TEXT_MODEL = "gemini-3-flash-preview"
 DEFAULT_IMAGE_MODEL = "gemini-3.1-flash-image-preview"
 
+# OpenAI / OpenAI-compatible 文字模型
+OPENAI_TEXT_MODEL_OPTIONS: tuple[ModelOption, ...] = (
+    ModelOption("gpt-5.4", "GPT-5.4"),
+    ModelOption("gpt-5.4-mini", "GPT-5.4 Mini"),
+    ModelOption("gpt-5.4-nano", "GPT-5.4 Nano"),
+    ModelOption("gpt-5.4-pro", "GPT-5.4 Pro"),
+    ModelOption("o4-mini", "o4 Mini"),
+    ModelOption("o3", "o3"),
+)
+
+# OpenAI 圖像模型
+OPENAI_IMAGE_MODEL_OPTIONS: tuple[ModelOption, ...] = (
+    ModelOption("gpt-image-2", "GPT Image 2（新版 Edits）"),
+    ModelOption("gpt-image-1.5", "GPT Image 1.5（新版 Edits）"),
+    ModelOption("gpt-image-1", "GPT Image 1"),
+    ModelOption("gpt-image-1-mini", "GPT Image 1 Mini"),
+)
+
+DEFAULT_OPENAI_TEXT_MODEL = "gpt-5.4-mini"
+DEFAULT_OPENAI_IMAGE_MODEL = "gpt-image-2"
+
+
+def get_text_provider() -> str:
+    """TEXT_PROVIDER 環境變數；預設 gemini。"""
+    return (os.environ.get("TEXT_PROVIDER") or "gemini").strip().lower()
+
+
+def get_image_provider() -> str:
+    """IMAGE_PROVIDER 環境變數；預設 gemini。"""
+    return (os.environ.get("IMAGE_PROVIDER") or "gemini").strip().lower()
+
+
+def get_openai_api_key() -> str:
+    return (os.environ.get("OPENAI_API_KEY") or "").strip()
+
+
+def get_openai_base_url() -> str | None:
+    raw = (os.environ.get("OPENAI_BASE_URL") or "").strip()
+    return raw if raw else None
+
 
 def get_text_model() -> str:
-    """TEXT_MODEL 環境變數；空值用預設。非清單內字串仍允許（手改 .env 進階用法）。"""
+    """TEXT_MODEL 環境變數；空值依供應商用預設。非清單內字串仍允許（手改 .env 進階用法）。"""
     raw = (os.environ.get("TEXT_MODEL") or "").strip()
     if not raw:
-        return DEFAULT_TEXT_MODEL
+        return DEFAULT_OPENAI_TEXT_MODEL if get_text_provider() == "openai" else DEFAULT_TEXT_MODEL
     return raw
 
 
 def get_image_model() -> str:
-    """IMAGE_MODEL 環境變數；空值用預設。非清單內字串仍允許。"""
+    """IMAGE_MODEL 環境變數；空值依供應商用預設。非清單內字串仍允許。"""
     raw = (os.environ.get("IMAGE_MODEL") or "").strip()
     if not raw:
-        return DEFAULT_IMAGE_MODEL
+        return DEFAULT_OPENAI_IMAGE_MODEL if get_image_provider() == "openai" else DEFAULT_IMAGE_MODEL
     return raw
 
 
@@ -61,11 +101,11 @@ def get_image_output_size() -> str:
     return "1K"
 
 
-# 與 parse_config、web_search、Gemini 用戶端等讀取的變數對齊；順序即寫入 .env 的順序。
+# 與 parse_config、web_search、用戶端等讀取的變數對齊；順序即寫入 .env 的順序。
 MANAGED_ENV_VARS: tuple[ManagedEnvVar, ...] = (
     ManagedEnvVar(
         "GOOGLE_API_KEY",
-        "Gemini 的 API 金鑰；階段一至三文字與圖像生成皆使用此鍵。",
+        "Gemini 的 API 金鑰；使用 Gemini 供應商時必填。",
     ),
     ManagedEnvVar(
         "STAGE3_ONLY_MODE",
@@ -80,16 +120,32 @@ MANAGED_ENV_VARS: tuple[ManagedEnvVar, ...] = (
         "階段一 LLM 自動呼叫中，search_web 實際查詢次數上限（0～9 的整數；預設 3）。不含觸發上限時回傳的系統訊息。",
     ),
     ManagedEnvVar(
+        "TEXT_PROVIDER",
+        "文字模型供應商：gemini（預設）或 openai。",
+    ),
+    ManagedEnvVar(
+        "IMAGE_PROVIDER",
+        "圖像模型供應商：gemini（預設）或 openai。",
+    ),
+    ManagedEnvVar(
         "TEXT_MODEL",
-        "階段一、二與 JSON 等使用的文字模型。儲存值為 Google GenAI 官方 model 代碼；介面以下拉顯示常用名稱。",
+        "文字模型代碼；空值依供應商自動填入預設值。",
     ),
     ManagedEnvVar(
         "IMAGE_MODEL",
-        "階段三以 API 產圖時使用的圖像模型。儲存值為官方 model 代碼；介面以下拉顯示（如 Nano Banana 2）。",
+        "圖像模型代碼；空值依供應商自動填入預設值。",
     ),
     ManagedEnvVar(
         "IMAGE_OUTPUT_SIZE",
         "API 產圖輸出尺寸：512(中文可能變形)、1K、2K 或 4K（預設 1K）。含大量中文時可試 2K 以減少字元變形。",
+    ),
+    ManagedEnvVar(
+        "OPENAI_API_KEY",
+        "OpenAI 或相容 API 的金鑰；任一供應商設為 openai 時必填。",
+    ),
+    ManagedEnvVar(
+        "OPENAI_BASE_URL",
+        "OpenAI-compatible API 端點（留空則使用 https://api.openai.com/v1）。可填入 Groq、OpenRouter、Ollama 等相容端點。",
     ),
 )
 
@@ -101,6 +157,18 @@ ENV_VARS_HIDDEN_FROM_SETTINGS_UI: frozenset[str] = frozenset(
         "STAGE3_ONLY_MODE",
     }
 )
+
+# TEXT_MODEL / IMAGE_MODEL 的下拉選項（依供應商分組），供設定 API 回傳前端使用。
+PROVIDER_MODEL_CHOICES: dict[str, dict[str, list[dict[str, str]]]] = {
+    "TEXT_MODEL": {
+        "gemini": [{"value": o.official_id, "label": o.label_zh} for o in TEXT_MODEL_OPTIONS],
+        "openai": [{"value": o.official_id, "label": o.label_zh} for o in OPENAI_TEXT_MODEL_OPTIONS],
+    },
+    "IMAGE_MODEL": {
+        "gemini": [{"value": o.official_id, "label": o.label_zh} for o in IMAGE_MODEL_OPTIONS],
+        "openai": [{"value": o.official_id, "label": o.label_zh} for o in OPENAI_IMAGE_MODEL_OPTIONS],
+    },
+}
 
 
 def resolve_project_root() -> str:

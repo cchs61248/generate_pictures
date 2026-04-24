@@ -69,3 +69,4 @@ cookies.json
 *.spec
 log/
 agent_history.jsonl
+.claude/

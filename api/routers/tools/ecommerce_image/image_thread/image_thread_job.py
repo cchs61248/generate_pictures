@@ -19,6 +19,7 @@ from api.deps import readable_error, safe_filename_part
 from api.deps import log_extra
 from api.routers.tools.ecommerce_image.image_thread.service import (
     latest_image_path_from_entries,
+    latest_provider_state_from_entries,
     load_image_thread_history,
     save_image_thread_history,
 )
@@ -26,7 +27,14 @@ from api.routers.tools.ecommerce_image.services.style_learning import (
     append_learning_event,
     get_style_prompt_by_id,
 )
-from core.config import get_image_model, get_image_output_size, sync_managed_env_from_dotenv
+from core.config import (
+    get_image_model,
+    get_image_output_size,
+    get_image_provider,
+    get_openai_api_key,
+    get_openai_base_url,
+    sync_managed_env_from_dotenv,
+)
 from core.token_logger import log_token_usage
 
 MAX_IMAGE_THREAD_JOB_EVENTS = 500
@@ -153,95 +161,78 @@ def _norm_session_title(t: str) -> str:
     return (t or "").strip()
 
 
-def _image_thread_generate_sync(
+async def _image_thread_generate_async(
     root: str,
     sid: str,
     user_text: str,
     session_title: str,
     selected_style_profile_id: str | None,
     latest_image_abs: str,
+    previous_provider_state: dict | None,
     cancel_event: threading.Event | None = None,
-) -> tuple[str, str | None]:
-    from google.genai import types as genai_types
-    import google.genai as genai_new
+) -> tuple[str, str | None, dict | None]:
     from PIL import Image
 
     if cancel_event and cancel_event.is_set():
         raise ImageThreadCancelled("run cancelled before start")
 
     sync_managed_env_from_dotenv(os.path.join(root, ".env"))
-    api_key = os.environ.get("GOOGLE_API_KEY") or ""
-    if not api_key:
-        logger.error("[image_thread_job] GOOGLE_API_KEY missing | sid=%s", sid)
-        raise ValueError("未設定 GOOGLE_API_KEY，請至設定頁填寫。")
-
-    client = genai_new.Client(api_key=api_key)
     model_name = get_image_model()
 
     style_prompt = get_style_prompt_by_id(
         root=root,
         selected_profile_id=selected_style_profile_id,
     )
-    system_instruction = (
-                "你是一位專業的電商圖片修改助手。使用者會提供一張商品圖片，並以文字描述希望如何修改。\n"
-                "請依照使用者的描述修改圖片，並回傳修改後的圖片。\n"
-                "若使用者的描述不夠清楚，可以先以文字詢問補充資訊，同時也提供一個依目前理解修改的版本。\n"
-                "回應時請先以簡短文字說明你做了哪些修改，再提供圖片。"
-            ) + (style_prompt or "")
+    style_instruction = (
+        "你是一位專業的電商圖片修改助手。使用者會提供一張商品圖片，並以文字描述希望如何修改。\n"
+        "請依照使用者的描述修改圖片，並回傳修改後的圖片。\n"
+        "若使用者的描述不夠清楚，可以先以文字詢問補充資訊，同時也提供一個依目前理解修改的版本。\n"
+        "回應時請先以簡短文字說明你做了哪些修改，再提供圖片。"
+    ) + (style_prompt or "")
 
     with open(latest_image_abs, "rb") as img_f:
         ref_image_bytes = img_f.read()
 
-    mime = "image/png" if latest_image_abs.lower().endswith(".png") else "image/jpeg"
+    img_prov = get_image_provider()
+    if img_prov == "openai":
+        api_key = get_openai_api_key()
+        if not api_key:
+            raise ValueError("未設定 OPENAI_API_KEY，請至設定頁填寫。")
+        from core.providers.openai_compat import OpenAIImageProvider
+        provider = OpenAIImageProvider(api_key, get_openai_base_url())
+    else:
+        api_key = os.environ.get("GOOGLE_API_KEY") or ""
+        if not api_key:
+            raise ValueError("未設定 GOOGLE_API_KEY，請至設定頁填寫。")
+        import google.genai as genai_new
+        genai_client = genai_new.Client(api_key=api_key)
+        from core.providers.gemini import GeminiImageProvider
+        provider = GeminiImageProvider(genai_client)
 
-    contents = [
-        genai_types.Content(
-            role="user",
-            parts=[
-                genai_types.Part.from_bytes(data=ref_image_bytes, mime_type=mime),
-                genai_types.Part.from_text(text=user_text),
-            ],
-        )
-    ]
-
-    response = client.models.generate_content(
+    edit_result = await provider.edit_image(
         model=model_name,
-        contents=contents,
-        config=genai_types.GenerateContentConfig(
-            system_instruction=system_instruction,
-            response_modalities=["TEXT", "IMAGE"],
-            image_config=genai_types.ImageConfig(
-                aspect_ratio="1:1",
-                image_size=get_image_output_size(),
-            ),
-        ),
+        image_bytes=ref_image_bytes,
+        prompt=user_text,
+        style_instruction=style_instruction,
+        image_size=get_image_output_size(),
+        previous_provider_state=previous_provider_state,
     )
 
     if cancel_event and cancel_event.is_set():
         raise ImageThreadCancelled("run cancelled after model response")
 
-    usage = getattr(response, "usage_metadata", None)
-    if usage is not None:
-        try:
-            log_token_usage(
-                model=model_name,
-                source="image_thread",
-                input_tokens=getattr(usage, "prompt_token_count", 0) or 0,
-                output_tokens=getattr(usage, "candidates_token_count", 0) or 0,
-            )
-        except Exception:
-            pass
-
-    result_text = ""
-    result_image_bytes: bytes | None = None
-    for part in getattr(response, "parts", None) or []:
-        if hasattr(part, "text") and part.text:
-            result_text += part.text
-        elif hasattr(part, "inline_data") and part.inline_data is not None:
-            result_image_bytes = part.inline_data.data
+    try:
+        log_token_usage(
+            model=model_name,
+            source="image_thread",
+            input_tokens=edit_result.input_tokens,
+            output_tokens=edit_result.output_tokens,
+        )
+    except Exception:
+        pass
 
     saved_filename: str | None = None
-    if result_image_bytes:
+    if edit_result.image_bytes:
         if cancel_event and cancel_event.is_set():
             raise ImageThreadCancelled("run cancelled before image save")
         picture_dir = os.path.join(root, "picture")
@@ -249,7 +240,7 @@ def _image_thread_generate_sync(
         safe_title = safe_filename_part(session_title)
         filename = f"{safe_title}_{sid}_{int(time.time())}.jpg"
         out_path = os.path.join(picture_dir, filename)
-        img = Image.open(io.BytesIO(result_image_bytes))
+        img = Image.open(io.BytesIO(edit_result.image_bytes))
         img.load()
         resized = img.resize((1000, 1000), Image.LANCZOS)
         if resized.mode != "RGB":
@@ -258,12 +249,12 @@ def _image_thread_generate_sync(
         saved_filename = filename
 
     logger.debug(
-        "[image_thread_job] sync generate done | sid=%s text_chars=%d saved_image=%s",
+        "[image_thread_job] generate done | sid=%s text_chars=%d saved_image=%s",
         sid,
-        len(result_text),
+        len(edit_result.text),
         saved_filename or "",
     )
-    return result_text, saved_filename
+    return edit_result.text, saved_filename, edit_result.provider_state
 
 
 class ImageThreadJob:
@@ -393,26 +384,30 @@ class ImageThreadJob:
 
                 await self.on_event({"type": "progress", "content": "正在處理圖片，請稍候…"})
 
-                result_text, saved_filename = await asyncio.to_thread(
-                    _image_thread_generate_sync,
+                current_entries = load_image_thread_history(self.root, self.sid)
+                prev_state = latest_provider_state_from_entries(current_entries)
+
+                result_text, saved_filename, new_provider_state = await _image_thread_generate_async(
                     self.root,
                     self.sid,
                     self.user_text,
                     self.session_title,
                     self.selected_style_profile_id,
                     latest_image_abs,
+                    prev_state,
                     self.cancel_event,
                 )
 
                 current_entries = load_image_thread_history(self.root, self.sid)
                 current_entries.append({"type": "user", "text": self.user_text})
-                current_entries.append(
-                    {
-                        "type": "model",
-                        "text": result_text or "",
-                        "image_path": saved_filename,
-                    }
-                )
+                model_entry: dict = {
+                    "type": "model",
+                    "text": result_text or "",
+                    "image_path": saved_filename,
+                }
+                if new_provider_state:
+                    model_entry["provider_state"] = new_provider_state
+                current_entries.append(model_entry)
                 save_image_thread_history(self.root, self.sid, current_entries)
                 try:
                     append_learning_event(

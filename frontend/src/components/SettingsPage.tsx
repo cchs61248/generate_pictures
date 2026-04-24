@@ -14,10 +14,12 @@ import {
   deleteStyleLearningQueue,
   extractStyleLearning,
   type EnvVariableRow,
+  FALLBACK_PROVIDER_MODEL_CHOICES,
   fetchStyleLearningHistory,
   fetchStyleLearningQueue,
   fetchStyleLearningStatus,
   type ModelChoiceOption,
+  type ProviderModelChoices,
   restoreStyleLearningQueue,
   renameStyleProfile,
   rollbackStyleLearning,
@@ -177,6 +179,9 @@ function SettingsPageComponent({
   const [modelChoices, setModelChoices] = useState<
     Record<string, ModelChoiceOption[]>
   >({})
+  const [providerModelChoices, setProviderModelChoices] = useState<ProviderModelChoices>(
+    FALLBACK_PROVIDER_MODEL_CHOICES,
+  )
   const [loading, setLoading] = useState(true)
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState<string | null>(null)
@@ -217,6 +222,7 @@ function SettingsPageComponent({
     try {
       const data = await fetchEnvSettings(baseUrl)
       setModelChoices(data.modelChoices ?? {})
+      if (data.providerModelChoices) setProviderModelChoices(data.providerModelChoices)
       setRows(
         data.variables
           .filter((v) => !ENV_KEYS_HIDDEN_FROM_SETTINGS_UI.has(v.key))
@@ -592,79 +598,114 @@ function SettingsPageComponent({
               ，並立即套用至目前後端行程；產圖與搜尋等流程都會讀取這裡的值。
             </p>
             <ul className="settings-env-list">
-              {rows.map((row) => (
-                <li key={row.key} className="settings-env-item">
-                  <div className="settings-env-meta">
-                    <label className="settings-env-key" htmlFor={`env-${row.key}`}>
-                      {row.key}
-                    </label>
-                    <p className="settings-env-desc">{row.description}</p>
-                  </div>
-                  {row.key === "TEXT_MODEL" || row.key === "IMAGE_MODEL" ? (
-                    <select
-                      id={`env-${row.key}`}
-                      className="settings-env-input settings-env-select"
-                      value={row.value}
-                      onChange={(e) => setValue(row.key, e.target.value)}
-                      aria-label={row.key}
-                    >
-                      {modelSelectOptions(
-                        row,
-                        resolveModelChoices(row.key, modelChoices),
-                      ).map((opt) => (
-                        <option key={opt.value} value={opt.value}>
-                          {opt.label}
-                        </option>
-                      ))}
-                    </select>
-                  ) : row.key === "MAX_LLM_SEARCH_CALLS" ? (
-                    <input
-                      id={`env-${row.key}`}
-                      className="settings-env-input"
-                      type="number"
-                      min={0}
-                      max={9}
-                      step={1}
-                      inputMode="numeric"
-                      pattern="[0-9]*"
-                      autoComplete="off"
-                      value={row.value}
-                      onChange={(e) =>
-                        setValue(
-                          row.key,
-                          clampMaxLlmSearchCallsInput(e.target.value),
-                        )
-                      }
-                    />
-                  ) : (
-                    <input
-                      id={`env-${row.key}`}
-                      className="settings-env-input"
-                      type="text"
-                      autoComplete="off"
-                      spellCheck={false}
-                      value={
-                        isApiKeyEnvKey(row.key) && activeApiKeyInputKey !== row.key
-                          ? maskMiddleWithStars(row.value)
-                          : row.value
-                      }
-                      onFocus={() => {
-                        if (isApiKeyEnvKey(row.key)) {
-                          setActiveApiKeyInputKey(row.key)
-                        }
-                      }}
-                      onBlur={() => {
-                        if (isApiKeyEnvKey(row.key)) {
-                          setActiveApiKeyInputKey((prev) =>
-                            prev === row.key ? null : prev,
+              {rows.map((row) => {
+                // 當任一 provider = openai 時才顯示 OpenAI 金鑰欄位
+                const textProviderVal = rows.find((r) => r.key === "TEXT_PROVIDER")?.value ?? "gemini"
+                const imageProviderVal = rows.find((r) => r.key === "IMAGE_PROVIDER")?.value ?? "gemini"
+                const anyOpenai = textProviderVal === "openai" || imageProviderVal === "openai"
+                if (
+                  (row.key === "OPENAI_API_KEY" || row.key === "OPENAI_BASE_URL") &&
+                  !anyOpenai
+                ) {
+                  return null
+                }
+                return (
+                  <li key={row.key} className="settings-env-item">
+                    <div className="settings-env-meta">
+                      <label className="settings-env-key" htmlFor={`env-${row.key}`}>
+                        {row.key}
+                      </label>
+                      <p className="settings-env-desc">{row.description}</p>
+                    </div>
+                    {row.key === "TEXT_PROVIDER" || row.key === "IMAGE_PROVIDER" ? (
+                      <select
+                        id={`env-${row.key}`}
+                        className="settings-env-input settings-env-select"
+                        value={row.value || "gemini"}
+                        onChange={(e) => {
+                          const newProv = e.target.value
+                          setValue(row.key, newProv)
+                          // 切換 provider 時同步更新對應 MODEL 欄位為新 provider 的預設值
+                          const modelKey = row.key === "TEXT_PROVIDER" ? "TEXT_MODEL" : "IMAGE_MODEL"
+                          const firstChoice = providerModelChoices[modelKey]?.[newProv]?.[0]?.value
+                          if (firstChoice) setValue(modelKey, firstChoice)
+                        }}
+                        aria-label={row.key}
+                      >
+                        <option value="gemini">Gemini</option>
+                        <option value="openai">OpenAI / Compatible</option>
+                      </select>
+                    ) : row.key === "TEXT_MODEL" || row.key === "IMAGE_MODEL" ? (
+                      <select
+                        id={`env-${row.key}`}
+                        className="settings-env-input settings-env-select"
+                        value={row.value}
+                        onChange={(e) => setValue(row.key, e.target.value)}
+                        aria-label={row.key}
+                      >
+                        {modelSelectOptions(
+                          row,
+                          (() => {
+                            const prov = row.key === "TEXT_MODEL" ? textProviderVal : imageProviderVal
+                            const fromProvider = providerModelChoices[row.key]?.[prov]
+                            if (fromProvider && fromProvider.length > 0) return fromProvider
+                            return resolveModelChoices(row.key, modelChoices)
+                          })(),
+                        ).map((opt) => (
+                          <option key={opt.value} value={opt.value}>
+                            {opt.label}
+                          </option>
+                        ))}
+                      </select>
+                    ) : row.key === "MAX_LLM_SEARCH_CALLS" ? (
+                      <input
+                        id={`env-${row.key}`}
+                        className="settings-env-input"
+                        type="number"
+                        min={0}
+                        max={9}
+                        step={1}
+                        inputMode="numeric"
+                        pattern="[0-9]*"
+                        autoComplete="off"
+                        value={row.value}
+                        onChange={(e) =>
+                          setValue(
+                            row.key,
+                            clampMaxLlmSearchCallsInput(e.target.value),
                           )
                         }
-                      }}
-                      onChange={(e) => setValue(row.key, e.target.value)}
-                    />
-                  )}
-                </li>
-              ))}
+                      />
+                    ) : (
+                      <input
+                        id={`env-${row.key}`}
+                        className="settings-env-input"
+                        type="text"
+                        autoComplete="off"
+                        spellCheck={false}
+                        value={
+                          isApiKeyEnvKey(row.key) && activeApiKeyInputKey !== row.key
+                            ? maskMiddleWithStars(row.value)
+                            : row.value
+                        }
+                        onFocus={() => {
+                          if (isApiKeyEnvKey(row.key)) {
+                            setActiveApiKeyInputKey(row.key)
+                          }
+                        }}
+                        onBlur={() => {
+                          if (isApiKeyEnvKey(row.key)) {
+                            setActiveApiKeyInputKey((prev) =>
+                              prev === row.key ? null : prev,
+                            )
+                          }
+                        }}
+                        onChange={(e) => setValue(row.key, e.target.value)}
+                      />
+                    )}
+                  </li>
+                )
+              })}
             </ul>
             <div className="settings-page-actions">
               <button
