@@ -9,6 +9,8 @@ import io
 import json
 from typing import Any
 
+from PIL import Image as _PILImage
+
 from core.app_logging import get_backend_logger
 from core.providers.base import (
     ContentItem,
@@ -410,6 +412,50 @@ class OpenAIImageProvider(ImageProvider):
         previous_provider_state: dict | None = None,
     ) -> EditResult:
         client = self._client()
+
+        # gpt-image-2 等圖像專用模型不被 Responses API 接受，改走 images.edit() 路徑。
+        if model in _EDIT_CAPABLE_MODELS:
+            pil_img = _PILImage.open(io.BytesIO(image_bytes))
+            rgba = pil_img.convert("RGBA") if pil_img.mode != "RGBA" else pil_img
+            buf = io.BytesIO()
+            rgba.save(buf, format="PNG")
+            png_bytes = buf.getvalue()
+            full_prompt = f"{style_instruction}\n\n{prompt}" if style_instruction else prompt
+            size = _map_image_size_openai(image_size)
+
+            def _edit_capable() -> Any:
+                kwargs: dict[str, Any] = {
+                    "model": model,
+                    "image": ("reference.png", png_bytes, "image/png"),
+                    "prompt": full_prompt,
+                    "size": size,
+                }
+                return client.images.edit(**kwargs)
+
+            logger.info(
+                "[openai_compat] edit_image images.edit path | model=%s size=%s prompt_len=%d",
+                model, size, len(full_prompt),
+            )
+            try:
+                response = await asyncio.to_thread(_edit_capable)
+            except Exception as exc:
+                logger.warning(
+                    "[openai_compat] edit_image images.edit error | model=%s err=%s", model, str(exc)
+                )
+                raise RuntimeError(_friendly_image_error(exc, model)) from exc
+
+            b64 = response.data[0].b64_json
+            result_bytes = base64.b64decode(b64)
+            usage = getattr(response, "usage", None)
+            input_tokens, output_tokens = _usage_tokens(usage)
+            return EditResult(
+                text="",
+                image_bytes=result_bytes,
+                input_tokens=input_tokens,
+                output_tokens=output_tokens,
+                provider_state=None,
+            )
+
         use_instructions = _is_official_openai(self._base_url)
 
         # 官方 OpenAI：style_instruction 透過 instructions 頂層參數傳入，prompt 保持純粹。
