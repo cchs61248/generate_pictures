@@ -477,6 +477,20 @@
   min-height: 44px;
 }
 
+.settings-env-input-group {
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+}
+
+.settings-env-note {
+  margin: 0;
+  font-size: 0.78rem;
+  line-height: 1.5;
+  color: var(--text-muted);
+  opacity: 0.8;
+}
+
 .settings-env-select:focus {
   outline: none;
   border-color: rgba(var(--accent-cyan-rgb), 0.55);

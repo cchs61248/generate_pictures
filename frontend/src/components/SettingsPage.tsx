@@ -657,6 +657,23 @@ function SettingsPageComponent({
                           </option>
                         ))}
                       </select>
+                    ) : row.key === "IMAGE_OUTPUT_SIZE" ? (
+                      <div className="settings-env-input-group">
+                        <select
+                          id={`env-${row.key}`}
+                          className="settings-env-input settings-env-select"
+                          value={row.value || "1K"}
+                          onChange={(e) => setValue(row.key, e.target.value)}
+                          aria-label={row.key}
+                        >
+                          <option value="1K">1K（預設）</option>
+                          <option value="2K">2K</option>
+                          <option value="4K">4K</option>
+                        </select>
+                        <p className="settings-env-note">
+                          OpenAI 供應商：所有選項實際輸出均為 1024×1024。2K／4K 僅對 Gemini 模型有效。
+                        </p>
+                      </div>
                     ) : row.key === "MAX_LLM_SEARCH_CALLS" ? (
                       <input
                         id={`env-${row.key}`}
