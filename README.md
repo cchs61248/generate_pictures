@@ -1,7 +1,7 @@
-# gnerate_pictures
+# generate_pictures
 
-以 **Google Gemini** 為核心的電商圖片生成平台。
-前端為 React 多工具聊天介面，後端為 FastAPI，業務邏輯依工具分層組織。
+支援 **Google Gemini** 與 **OpenAI**（及任何 OpenAI-compatible API）雙供應商的電商圖片生成平台。
+文字模型與圖像模型可各自獨立切換供應商；前端為 React 多工具聊天介面，後端為 FastAPI，業務邏輯依工具分層組織。
 
 目前已上線工具：**AI 電商圖文助手** — 上傳商品圖與描述（可附 txt/pdf/docx/md 說明文件），自動生成 P1~P9 共 9 款電商風格圖。
 
@@ -18,16 +18,20 @@
 
 ## 環境變數設定
 
-將 `.env.example` 複製為 `.env`，填入必要金鑰：
+將 `.env.example` 複製為 `.env`，填入必要金鑰。文字與圖像供應商可各自獨立設定：
 
 | 變數 | 說明 |
 |------|------|
-| `GOOGLE_API_KEY` | Gemini API 金鑰（必填） |
+| `TEXT_PROVIDER` | 文字模型供應商：`gemini`（預設）或 `openai` |
+| `IMAGE_PROVIDER` | 圖像模型供應商：`gemini`（預設）或 `openai` |
+| `GOOGLE_API_KEY` | Gemini API 金鑰（任一供應商設為 `gemini` 時必填） |
+| `OPENAI_API_KEY` | OpenAI 或相容 API 金鑰（任一供應商設為 `openai` 時必填） |
+| `OPENAI_BASE_URL` | OpenAI-compatible API 端點（留空用官方；可填 Groq、OpenRouter、Ollama 等） |
+| `TEXT_MODEL` | 文字模型代碼（留空依供應商自動填入預設） |
+| `IMAGE_MODEL` | 圖像模型代碼（留空依供應商自動填入預設） |
+| `IMAGE_OUTPUT_SIZE` | 產圖解析度：`1K` / `2K` / `4K`（預設 `1K`） |
 | `TAVILY_API_KEY` | 網路搜尋金鑰（階段一用，選填；未填則跳過搜尋） |
 | `MAX_LLM_SEARCH_CALLS` | 階段一最多搜尋次數（0–9，預設 3） |
-| `TEXT_MODEL` | 文字模型代碼（留空用預設） |
-| `IMAGE_MODEL` | 圖像模型代碼（留空用預設） |
-| `IMAGE_OUTPUT_SIZE` | 產圖解析度：`512` / `1K` / `2K` / `4K`（預設 `1K`） |
 
 前端環境變數：`frontend/.env`
 
@@ -62,8 +66,8 @@ npm run dev
 
 此方案使用同一個 Git Repo 建立兩個 Railway Service：
 
-- `gnerate-pictures-backend`（FastAPI）
-- `gnerate-pictures-frontend`（Vite build 後以靜態站提供）
+- `generate-pictures-backend`（FastAPI）
+- `generate-pictures-frontend`（Vite build 後以靜態站提供）
 
 ### 1) 建立 Backend Service（Railway）
 
@@ -124,7 +128,7 @@ Frontend 需要設定：
 
 ## 打包成 EXE 資料夾（onedir，含 Playwright 自動開頁）
 
-以下流程會產出一個 `dist/gnerate_pictures_launcher/` 資料夾，執行後會：
+以下流程會產出一個 `dist/generate_pictures_launcher/` 資料夾，執行後會：
 
 - 在 terminal 視窗啟動後端 API（`127.0.0.1:8000`）
 - 啟動前端靜態站台（`127.0.0.1:5173`）
@@ -155,17 +159,17 @@ $env:PLAYWRIGHT_BROWSERS_PATH='0'
 ### 產生 EXE
 
 ```powershell
-.\.venv\Scripts\pyinstaller.exe --noconfirm --clean --console --name gnerate_pictures_launcher --add-data "frontend/dist;frontend/dist" --add-data ".venv/Lib/site-packages/playwright/driver/package/.local-browsers;playwright/driver/package/.local-browsers" launcher.py
+.\.venv\Scripts\pyinstaller.exe --noconfirm --clean --console --name generate_pictures_launcher --add-data "frontend/dist;frontend/dist" --add-data ".venv/Lib/site-packages/playwright/driver/package/.local-browsers;playwright/driver/package/.local-browsers" launcher.py
 ```
 
 ### 執行 EXE
 
 ```powershell
-cd .\dist\gnerate_pictures_launcher
-.\gnerate_pictures_launcher.exe
+cd .\dist\generate_pictures_launcher
+.\generate_pictures_launcher.exe
 ```
 
-> 已內建單一實例防呆：若程式已在執行，再次開啟 `gnerate_pictures_launcher.exe` 會跳出提示並直接結束第二個實例。
+> 已內建單一實例防呆：若程式已在執行，再次開啟 `generate_pictures_launcher.exe` 會跳出提示並直接結束第二個實例。
 
 ### 重新打包前提醒
 
@@ -180,7 +184,7 @@ cd .\dist\gnerate_pictures_launcher
 ## 專案架構
 
 ```
-gnerate_pictures/
+generate_pictures/
 │
 ├── main.py                   CLI 入口（可直接執行三階段管線）
 ├── requirements.txt

@@ -6,8 +6,8 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## 專案概述
 
-**gnerate_pictures** 是一個以 Google Gemini 為核心的電商圖片生成平台。
-前端為 React 多工具聊天介面；後端為 FastAPI，依工具分層組織業務邏輯。
+**generate_pictures** 是一個支援 **Google Gemini** 與 **OpenAI**（及任何 OpenAI-compatible API）雙供應商的電商圖片生成平台。
+文字模型（`TEXT_PROVIDER`）與圖像模型（`IMAGE_PROVIDER`）可各自獨立切換供應商；前端為 React 多工具聊天介面；後端為 FastAPI，依工具分層組織業務邏輯。
 目前已上線工具：**AI 電商圖文助手**（工具 id：`ecommerce-image`）。
 
 使用者須先上傳商品圖，可再輸入描述或網址，並可附加 **txt / pdf / doc / docx / md** 說明文件，一併送入 pipeline。
